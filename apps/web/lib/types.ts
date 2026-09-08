@@ -241,6 +241,24 @@ export interface Conversation {
   updated_at: string;
 }
 
+export interface AIProviderInfo {
+  id: string;
+  label: string;
+  kind: "mock" | "openai_compatible" | "cli";
+  detected: boolean;
+  needs_key: boolean;
+  default_base_url: string;
+  default_model: string;
+  hint: string;
+}
+
+export interface AISettings {
+  provider?: string;
+  model?: string;
+  base_url?: string;
+  has_api_key?: boolean;
+}
+
 export interface OnboardingProposal {
   profile: { dietary?: Record<string, unknown>; activity_level?: string };
   goals: { type: string; title: string; start_value?: number; target_value?: number; unit?: string }[];

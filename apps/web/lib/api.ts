@@ -225,4 +225,10 @@ export const api = {
     request<{ id: string; role: string; content: string }[]>(`/ai/conversations/${id}/messages`),
   parseOnboarding: (text: string) => post<OnboardingProposal>("/ai/onboarding/parse", { text }),
   commitOnboarding: (b: unknown) => post("/ai/onboarding/commit", b),
+  aiProviders: () => request<{ providers: import("./types").AIProviderInfo[] }>("/ai/providers"),
+  aiSettings: () => request<{ ai: import("./types").AISettings }>("/ai/settings"),
+  updateAiSettings: (b: { provider?: string; model?: string; base_url?: string; api_key?: string }) =>
+    put<{ ai: import("./types").AISettings }>("/ai/settings", b),
+  testAiProvider: (b: { provider?: string; model?: string; base_url?: string; api_key?: string }) =>
+    post<{ ok: boolean; latency_ms?: number; reply?: string; error?: string }>("/ai/test", b),
 };

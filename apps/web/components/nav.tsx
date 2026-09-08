@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ProviderPicker } from "@/components/ai-picker";
 import { cx } from "@/lib/utils";
 
 const NAV = [
@@ -50,10 +51,13 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="p-4 text-[11px] leading-relaxed text-faint">
-        Not a medical device.
-        <br />
-        For wellness tracking only.
+      <div className="space-y-3 p-4">
+        <ProviderPicker />
+        <div className="text-[11px] leading-relaxed text-faint">
+          Not a medical device.
+          <br />
+          For wellness tracking only.
+        </div>
       </div>
     </aside>
   );

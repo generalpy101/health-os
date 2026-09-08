@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, CheckCircle2, Sparkles, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Empty, Spinner } from "@/components/ui";
+import { ProviderPicker } from "@/components/ai-picker";
 import { api } from "@/lib/api";
 import type { ChatAction, ChatMessage } from "@/lib/types";
 import { cx } from "@/lib/utils";
@@ -54,7 +55,9 @@ export default function AssistantPage() {
       <header className="flex items-center gap-2 border-b border-line px-4 py-3.5 sm:px-6">
         <Sparkles size={17} className="text-accent" />
         <h1 className="font-display text-lg font-semibold tracking-tight">Assistant</h1>
-        <span className="ml-auto text-[11px] font-medium text-faint">Not medical advice</span>
+        <div className="ml-auto flex items-center gap-2">
+          <ProviderPicker />
+        </div>
       </header>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-6">

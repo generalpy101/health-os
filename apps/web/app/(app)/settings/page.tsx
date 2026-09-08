@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Moon, Sun, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { TopBar } from "@/components/nav";
+import { ProviderPicker, useAiProviders, useAiSettings } from "@/components/ai-picker";
 import { Button, Card, CardTitle, Field, Input, Select, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
 import { GOAL_TYPES, cx } from "@/lib/utils";
@@ -195,6 +196,8 @@ export default function SettingsPage() {
           </form>
         </Card>
 
+        <AISettingsCard />
+
         <Card>
           <CardTitle>What the AI remembers</CardTitle>
           {!memories?.length ? (
@@ -218,6 +221,129 @@ export default function SettingsPage() {
         </Card>
       </main>
     </>
+  );
+}
+
+function AISettingsCard() {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const providers = useAiProviders();
+  const settings = useAiSettings();
+  const [provider, setProvider] = useState("");
+  const [model, setModel] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [testResult, setTestResult] = useState<{ ok: boolean; latency_ms?: number; error?: string; reply?: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  useEffect(() => {
+    if (settings.provider !== undefined && !provider) {
+      setProvider(settings.provider || "mock");
+      setModel(settings.model || "");
+      setBaseUrl(settings.base_url || "");
+    }
+  }, [settings, provider]);
+
+  const preset = providers.find((p) => p.id === (provider || "mock"));
+  const showUrl = preset?.kind === "openai_compatible";
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.updateAiSettings({
+        provider: provider || "mock",
+        model: model || undefined,
+        base_url: showUrl ? baseUrl || undefined : undefined,
+        ...(apiKey ? { api_key: apiKey } : {}),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ai-settings"] });
+      toast("AI settings saved");
+      setApiKey("");
+    },
+    onError: (e) => toast(e.message, "err"),
+  });
+
+  async function test() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await api.testAiProvider({
+        provider: provider || "mock",
+        model: model || undefined,
+        base_url: showUrl ? baseUrl || undefined : undefined,
+        ...(apiKey ? { api_key: apiKey } : {}),
+      });
+      setTestResult(res);
+    } catch (e) {
+      setTestResult({ ok: false, error: e instanceof Error ? e.message : "failed" });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <Card className="scroll-mt-20" id="ai">
+      <CardTitle>AI provider</CardTitle>
+      <div className="space-y-3">
+        <Field label="Provider" hint="Local options keep your health data on this machine.">
+          <Select
+            value={provider || "mock"}
+            onChange={(e) => {
+              const p = providers.find((x) => x.id === e.target.value);
+              setProvider(e.target.value);
+              setModel(p?.default_model || "");
+              setBaseUrl(p?.default_base_url || "");
+              setTestResult(null);
+            }}
+          >
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}{p.detected ? "" : " (not detected)"}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {preset?.hint && (
+          <p className="-mt-1 text-xs leading-relaxed text-faint">{preset.hint}</p>
+        )}
+        {preset && preset.kind !== "mock" && (
+          <Field label={preset.kind === "cli" ? "Model (optional — CLI default if empty)" : "Model"}>
+            <Input value={model} onChange={(e) => setModel(e.target.value)}
+                   placeholder={preset.default_model || "model name"} />
+          </Field>
+        )}
+        {showUrl && (
+          <Field label="Base URL">
+            <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)}
+                   placeholder={preset?.default_base_url || "http://localhost:11434/v1"} />
+          </Field>
+        )}
+        {preset?.needs_key && (
+          <Field label="API key" hint={settings.has_api_key ? "A key is saved — leave empty to keep it" : "Stored server-side, never sent to the browser"}>
+            <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+                   placeholder={settings.has_api_key ? "••••••••" : "sk-…"} autoComplete="off" />
+          </Field>
+        )}
+        <div className="flex items-center gap-2">
+          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+            {save.isPending ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="outline" onClick={test} disabled={testing}>
+            {testing ? "Testing…" : "Test connection"}
+          </Button>
+        </div>
+        {testResult && (
+          <div className={cx(
+            "rounded-xl border px-3.5 py-2.5 text-sm",
+            testResult.ok ? "border-good/40 bg-olive-soft text-good" : "border-bad/40 bg-berry-soft text-bad"
+          )}>
+            {testResult.ok
+              ? `Connected${testResult.latency_ms != null ? ` in ${testResult.latency_ms}ms` : ""}${testResult.reply ? ` — “${testResult.reply}”` : ""}`
+              : `Failed: ${testResult.error}`}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

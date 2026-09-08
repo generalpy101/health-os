@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button, Card, Field, Input, PageLoading, Textarea, useToast } from "@/components/ui";
+import { ProviderPicker } from "@/components/ai-picker";
 import { api } from "@/lib/api";
 import type { OnboardingProposal } from "@/lib/types";
 import { useQueryClient } from "@tanstack/react-query";
@@ -76,7 +77,10 @@ export default function OnboardingPage() {
 
   return (
     <div className="mx-auto min-h-dvh max-w-xl px-5 py-10 sm:py-16">
-      <div className="font-display text-2xl font-bold">Health<span className="text-accent">OS</span></div>
+      <div className="flex items-center justify-between">
+        <div className="font-display text-2xl font-bold">Health<span className="text-accent">OS</span></div>
+        <ProviderPicker />
+      </div>
 
       {step === "write" && (
         <div className="mt-10">
