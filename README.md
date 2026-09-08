@@ -37,6 +37,37 @@ cd apps/web
 pnpm install && pnpm dev   # http://localhost:3000 (proxies /api/v1 -> localhost:8000)
 ```
 
+## AI providers (per-user, switchable in-app)
+
+Pick a provider anytime: **Settings → AI**, the chip in the **Assistant header**, the **sidebar**, or during **onboarding**.
+
+| Provider | Runs where | Notes |
+| --- | --- | --- |
+| Built-in offline (mock) | server | Deterministic; handles common logging phrasing; zero setup, zero keys |
+| OpenAI | cloud | Your key, stored server-side, never sent to the browser |
+| Ollama / LM Studio | your machine | Auto-detected; OpenAI-compatible endpoints |
+| Custom endpoint | anywhere | Any `/v1/chat/completions` (vLLM, LiteLLM, Groq, Together…) |
+| Claude Code / Codex / opencode | your machine | Uses your existing CLI logins, driven non-interactively with a strict JSON tool contract |
+
+**Using local CLIs (claude/codex/opencode) or a local model server:** the API must run on your
+machine (containers can't see host CLIs). Use local mode — DB stays in Docker:
+
+```bash
+./scripts/dev-local.sh
+```
+
+Then Settings → AI → pick e.g. "Claude Code (CLI)" → Test connection.
+
+## Migrations
+
+Alembic runs automatically at API startup (`alembic upgrade head`; a pre-existing database is
+stamped first). New revision after a model change:
+
+```bash
+cd services/api
+DATABASE_URL=postgresql+asyncpg://healthos:healthos@localhost:5432/healthos ../../.venv/bin/alembic revision --autogenerate -m "..."
+```
+
 ## Tests
 
 ```bash
@@ -62,11 +93,12 @@ docker-compose.yml
 
 ## API surface
 
-All under `/api/v1`: `auth/*`, `users/me*`, `goals`, `targets`, `foods/search`, `food-logs`,
-`nutrition/daily`, `recipes`, `meal-plans`, `grocery-list`, `exercises`, `workout-sessions`,
-`workout-plans`, `activities`, `sleep`, `water`, `measurements`, `habits*`, `schedule/*`,
-`analytics/daily|weekly|monthly|range`, `ai/chat`, `ai/conversations`, `ai/onboarding/*`.
-OpenAPI docs at `http://localhost:8000/docs` when the API runs.
+All under `/api/v1`: `auth/*`, `users/me*` (+ `users/me/export`, `DELETE /users/me`), `goals`,
+`targets`, `foods/search`, `food-logs`, `nutrition/daily`, `recipes`, `meal-plans`, `grocery-list`,
+`exercises`, `workout-sessions`, `workout-plans`, `activities`, `sleep`, `water`, `measurements`,
+`habits*`, `schedule/*`, `analytics/daily|weekly|monthly|range`, `ai/chat`, `ai/conversations`,
+`ai/onboarding/*`, `ai/providers`, `ai/settings`, `ai/test`, `ai/recommendations`, `photos*`,
+`notifications`. OpenAPI docs at `http://localhost:8000/docs` when the API runs.
 
 ## Not a medical device
 

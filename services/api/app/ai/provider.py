@@ -346,6 +346,8 @@ class MockProvider(AIProvider):
         last = next((m for m in reversed(messages) if m.get("role") == "user"), None)
         if last is None:
             return ProviderResponse(text="Done.", model="mock")
+        if last["content"].strip().lower() in ("reply with exactly: ok", "ping", "ok"):
+            return ProviderResponse(text="ok", model="mock")
 
         calls, hint = _mock_tool_calls(last["content"])
         if calls:

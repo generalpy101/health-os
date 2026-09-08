@@ -27,6 +27,7 @@ services:
     build: ./services/api
     environment:
       DOCKERIZED: "true"
+      STORAGE_DIR: /data/photos
       DATABASE_URL: postgresql+asyncpg://healthos:healthos@db:5432/healthos
       AUTH_SECRET: ${AUTH_SECRET:-dev-secret-change-me}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
@@ -34,6 +35,8 @@ services:
       AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
+    volumes:
+      - photostore:/data/photos
     depends_on:
       db:
         condition: service_healthy
@@ -51,3 +54,4 @@ services:
 
 volumes:
   pgdata:
+  photostore:
