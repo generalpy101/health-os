@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import tempfile
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -358,17 +360,18 @@ class MockProvider(AIProvider):
 
 
 # ---------------------------------------------------------------------------
-# OpenAI-compatible provider: works with OpenAI, Ollama, vLLM, etc.
+# OpenAI-compatible provider: works with OpenAI, Ollama, vLLM, LM Studio, etc.
 # ---------------------------------------------------------------------------
 
 class OpenAICompatibleProvider(AIProvider):
     name = "openai_compatible"
 
-    def __init__(self) -> None:
+    def __init__(self, base_url: str | None = None, api_key: str | None = None,
+                 model: str | None = None) -> None:
         s = get_settings()
-        self.base_url = s.ai_base_url.rstrip("/")
-        self.api_key = s.ai_api_key
-        self.model = s.ai_model
+        self.base_url = (base_url or s.ai_base_url).rstrip("/")
+        self.api_key = api_key if api_key is not None else s.ai_api_key
+        self.model = model or s.ai_model
 
     async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> ProviderResponse:
         payload: dict[str, Any] = {"model": self.model, "messages": messages}
@@ -399,8 +402,111 @@ class OpenAICompatibleProvider(AIProvider):
         )
 
 
+# ---------------------------------------------------------------------------
+# CLI agent provider: drives local agent CLIs (claude, codex, opencode)
+# non-interactively. Tool schemas are embedded in the prompt; the CLI must
+# answer with a JSON object only.
+# ---------------------------------------------------------------------------
+
+CLI_JSON_CONTRACT = """You are the assistant inside a personal health & fitness OS. You may act ONLY through the tools listed below.
+
+RULES:
+- Respond with ONLY a single minified JSON object, no markdown, no prose outside JSON:
+  {"reply": "<what you say to the user>", "tool_calls": [{"name": "<tool>", "arguments": {...}}]}
+- tool_calls may be empty. Only call tools from the list. Never invent exact numbers for estimates; use confidence instead.
+- Never diagnose. For medical concerns, tell the user to see a professional.
+
+TOOLS (JSON Schema):
+%s
+
+CONVERSATION:
+%s
+"""
+
+CLITimeout = 150  # seconds
+
+
+class CliProvider(AIProvider):
+    name = "cli"
+
+    def __init__(self, command: str, model: str | None = None) -> None:
+        self.command = command
+        self.model = model or ""
+
+    def _argv(self, prompt: str) -> list[str]:
+        if self.command == "claude":
+            argv = ["claude", "-p", prompt, "--output-format", "json"]
+            if self.model:
+                argv += ["--model", self.model]
+            return argv
+        if self.command == "codex":
+            return ["codex", "exec", "--skip-git-repo-check", prompt]
+        if self.command == "opencode":
+            argv = ["opencode", "run", prompt]
+            if self.model:
+                argv += ["-m", self.model]
+            return argv
+        return [self.command, prompt]
+
+    async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> ProviderResponse:
+        convo = []
+        for m in messages:
+            role = m.get("role", "user")
+            if role == "tool":
+                convo.append(f"TOOL[{m.get('name', 'tool')}] RESULT: {m.get('content', '')}")
+            elif role in ("user", "assistant"):
+                convo.append(f"{role.upper()}: {m.get('content', '')}")
+        compact_tools = json.dumps(
+            [{"name": t["name"], "description": t["description"], "schema": t["input_schema"]}
+             for t in (tools or [])],
+            separators=(",", ":"),
+        )
+        prompt = CLI_JSON_CONTRACT % (compact_tools, "\n\n".join(convo[-24:]))
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *self._argv(prompt),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=tempfile.gettempdir(),
+            )
+            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=CLITimeout)
+        except FileNotFoundError:
+            raise RuntimeError(f"CLI not installed on server: {self.command}")
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"{self.command} timed out after {CLITimeout}s")
+
+        text = stdout.decode(errors="replace").strip()
+        if self.command == "claude":
+            try:
+                envelope = json.loads(text)
+                text = envelope.get("result", text)
+            except json.JSONDecodeError:
+                pass
+        return self._parse(text)
+
+    @staticmethod
+    def _parse(text: str) -> ProviderResponse:
+        # tolerate prose around the JSON object
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end > start:
+            try:
+                data = json.loads(text[start:end + 1])
+                calls = [
+                    ToolCall(id=f"cli-{i}", name=str(c.get("name", "")), arguments=c.get("arguments") or {})
+                    for i, c in enumerate(data.get("tool_calls") or [])
+                    if c.get("name")
+                ]
+                return ProviderResponse(text=str(data.get("reply", "")), tool_calls=calls, model="cli")
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        return ProviderResponse(text=text or "No response from CLI.", model="cli")
+
+
 def get_provider() -> AIProvider:
+    """Env-configured default provider (used when the user has no override)."""
     settings = get_settings()
-    if settings.ai_provider == "openai_compatible" and (settings.ai_api_key or "localhost" in settings.ai_base_url):
+    if settings.ai_provider == "openai_compatible":
         return OpenAICompatibleProvider()
     return MockProvider()

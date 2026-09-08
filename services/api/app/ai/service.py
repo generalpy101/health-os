@@ -15,7 +15,8 @@ from ..models import AIAction, AIConversation, AIMessage, User, UserMemory, User
 from ..services import analytics as analytics_service
 from ..services import goals as goals_service
 from ..utils.time import user_now
-from .provider import AIProvider, get_provider
+from .provider import AIProvider, MockProvider
+from .registry import provider_for_user
 from .tools import REGISTRY, _s, execute_tool, tool_schemas
 
 SYSTEM_PROMPT = """You are the assistant inside a personal health & fitness OS.
@@ -24,6 +25,10 @@ and to log or change things. Deterministic math (calories, trends, BMI) is done 
 system, not by you. Never present estimates as exact facts. Never give medical diagnoses;
 for symptoms, medication, injuries or eating-disorder concerns, point to a professional.
 Keep replies concise and concrete. When you change something, say what changed.
+
+IMPORTANT — exactly-once logging: within a single reply, log each real-world item or event
+exactly ONCE. If you need a custom food/exercise first, create it FIRST, then log once with it.
+Never repeat a logging call with refined arguments; the user can edit instead.
 
 Current user context:
 {context}
@@ -73,7 +78,7 @@ async def _get_conversation(db: AsyncSession, user: User, conversation_id: UUID 
 async def chat(db: AsyncSession, user: User, message: str, conversation_id: UUID | None = None,
                provider: AIProvider | None = None) -> tuple[AIConversation, str, list[AIAction]]:
     settings = get_settings()
-    provider = provider or get_provider()
+    provider = provider or await provider_for_user(db, user)
     conv = await _get_conversation(db, user, conversation_id)
     db.add(AIMessage(conversation_id=conv.id, user_id=user.id, role="user", content=message))
     if conv.title == "Conversation":
@@ -153,7 +158,53 @@ NUMBER_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "fiv
                 "six": 6, "seven": 7, "twice": 2, "thrice": 3}
 
 
+ONBOARDING_PROMPT = """Extract a health/fitness setup from this user description. Return ONLY minified JSON with this shape:
+{"goals": [{"type": "weight_loss|weight_gain|maintenance|muscle_gain|strength|endurance|fitness|sleep|hydration|habit|nutrition|activity|sport|custom", "title": str, "start_value": number?, "target_value": number?, "unit": str?}],
+ "targets": [{"key": "calories|protein|water|steps|sleep_minutes|workouts|swimming", "value": number, "unit": str, "period": "daily|weekly"}],
+ "events": [{"type": "workout|swimming|work|sleep|meal|custom", "title": str, "bydays": [0-6, Monday=0], "hour": 0-23, "end_hour": 0-23?}],
+ "memories": [{"type": "fact|preference", "key": snake_case, "value": str}],
+ "dietary": {"diet": str?, "dislikes": [str]}}
+Only include what the text supports. Do not invent numbers.
+
+USER TEXT:
+%s"""
+
+
+async def _parse_onboarding_llm(provider: AIProvider, text: str) -> dict | None:
+    try:
+        resp = await provider.complete(
+            [{"role": "user", "content": ONBOARDING_PROMPT % text}], tools=None)
+        raw = resp.text.strip()
+        start, end = raw.find("{"), raw.rfind("}")
+        if start == -1 or end <= start:
+            return None
+        data = json.loads(raw[start:end + 1])
+        if not isinstance(data, dict) or "goals" not in data:
+            return None
+        dietary = data.get("dietary") or {}
+        return {
+            "profile": {"dietary": dietary, "activity_level": "moderate", "onboarding_completed": True},
+            "goals": [g for g in data.get("goals", []) if isinstance(g, dict) and g.get("title")],
+            "targets": [t for t in data.get("targets", []) if isinstance(t, dict) and t.get("key") and t.get("value")],
+            "events": [e for e in data.get("events", []) if isinstance(e, dict) and e.get("title")],
+            "habits": [],
+            "memories": [m for m in data.get("memories", []) if isinstance(m, dict) and m.get("key")],
+            "defaults_suggested": {"calories": 2000, "protein_g": 120, "water_ml": 2500},
+        }
+    except Exception:
+        return None
+
+
 async def parse_onboarding(db: AsyncSession, user: User, text: str) -> dict:
+    provider = await provider_for_user(db, user)
+    if not isinstance(provider, MockProvider):
+        parsed = await _parse_onboarding_llm(provider, text)
+        if parsed is not None:
+            return parsed
+    return _parse_onboarding_keywords(text)
+
+
+def _parse_onboarding_keywords(text: str) -> dict:
     """Keyword-based extraction (works offline). A hosted provider refines it later."""
     t = text.lower()
     goals_out: list[dict] = []

@@ -26,6 +26,7 @@ services:
   api:
     build: ./services/api
     environment:
+      DOCKERIZED: "true"
       DATABASE_URL: postgresql+asyncpg://healthos:healthos@db:5432/healthos
       AUTH_SECRET: ${AUTH_SECRET:-dev-secret-change-me}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}

@@ -1,13 +1,18 @@
+import time
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..ai import service as ai_service
+from ..ai.registry import (detect_providers, get_ai_pref, mask_ai_pref, resolve_provider_from_pref,
+                           save_ai_pref)
 from ..db import get_db
 from ..deps import current_user
-from ..models import AIAction, AIConversation, AIMessage, Recommendation, User, UserMemory, UserProfile
+from ..models import (AIAction, AIConversation, AIMessage, Recommendation, User, UserMemory,
+                      UserPreference, UserProfile)
 from ..schemas import (ActionOut, ChatIn, ChatOut, ConversationOut, MessageOut, OnboardingCommitIn,
                        OnboardingParseIn, RecommendationOut, RecommendationPatch)
 from ..services import goals as goals_service
@@ -22,6 +27,50 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 async def chat(data: ChatIn, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     conv, reply, actions = await ai_service.chat(db, user, data.message, data.conversation_id)
     return ChatOut(conversation_id=conv.id, reply=reply, actions=actions)
+
+
+# ---------- provider selection ----------
+
+@router.get("/providers")
+async def list_providers(user: User = Depends(current_user)):
+    return {"providers": await detect_providers()}
+
+
+@router.get("/settings")
+async def get_ai_settings(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    pref = (await db.execute(select(UserPreference).where(UserPreference.user_id == user.id))).scalar_one_or_none()
+    return {"ai": mask_ai_pref(get_ai_pref(pref))}
+
+
+class AISettingsIn(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+
+
+@router.put("/settings")
+async def put_ai_settings(data: AISettingsIn, user: User = Depends(current_user),
+                          db: AsyncSession = Depends(get_db)):
+    ai = {k: v for k, v in data.model_dump().items() if v is not None}
+    return {"ai": await save_ai_pref(db, user, ai)}
+
+
+@router.post("/test")
+async def test_provider(data: AISettingsIn, user: User = Depends(current_user),
+                        db: AsyncSession = Depends(get_db)):
+    pref = (await db.execute(select(UserPreference).where(UserPreference.user_id == user.id))).scalar_one_or_none()
+    merged = {**get_ai_pref(pref), **{k: v for k, v in data.model_dump().items() if v}}
+    provider = resolve_provider_from_pref(merged)
+    started = time.perf_counter()
+    try:
+        resp = await provider.complete(
+            [{"role": "user", "content": "Reply with exactly: ok"}], tools=None)
+        latency = int((time.perf_counter() - started) * 1000)
+        text = (resp.text or "").strip()
+        return {"ok": bool(text), "latency_ms": latency, "reply": text[:200]}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
