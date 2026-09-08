@@ -442,7 +442,11 @@ class CliProvider(AIProvider):
                 argv += ["--model", self.model]
             return argv
         if self.command == "codex":
-            return ["codex", "exec", "--skip-git-repo-check", prompt]
+            argv = ["codex", "exec", "--skip-git-repo-check"]
+            if self.model:
+                argv += ["-m", self.model]
+            argv.append(prompt)
+            return argv
         if self.command == "opencode":
             argv = ["opencode", "run", prompt]
             if self.model:

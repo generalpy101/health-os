@@ -43,7 +43,7 @@ export function ProviderPicker({ direction = "down" }: { direction?: "down" | "u
       const preset = providers.find((p) => p.id === provider);
       return api.updateAiSettings({
         provider,
-        model: preset?.default_model || undefined,
+        model: preset?.default_model ?? "",   // reset model on provider switch ("" = CLI default)
         base_url: preset?.default_base_url || undefined,
       });
     },

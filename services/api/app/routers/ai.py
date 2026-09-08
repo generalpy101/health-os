@@ -36,6 +36,19 @@ async def list_providers(user: User = Depends(current_user)):
     return {"providers": await detect_providers()}
 
 
+@router.get("/providers/{provider_id}/models")
+async def list_provider_models(provider_id: str, base_url: str | None = None,
+                               user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    from ..ai.registry import discover_models, get_ai_pref
+    pref = (await db.execute(select(UserPreference).where(UserPreference.user_id == user.id))).scalar_one_or_none()
+    saved = get_ai_pref(pref)
+    return await discover_models(
+        provider_id,
+        base_url=base_url if base_url is not None else saved.get("base_url", ""),
+        api_key=saved.get("api_key", ""),
+    )
+
+
 @router.get("/settings")
 async def get_ai_settings(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     pref = (await db.execute(select(UserPreference).where(UserPreference.user_id == user.id))).scalar_one_or_none()

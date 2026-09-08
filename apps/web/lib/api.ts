@@ -276,4 +276,7 @@ export const api = {
     put<{ ai: import("./types").AISettings }>("/ai/settings", b),
   testAiProvider: (b: { provider?: string; model?: string; base_url?: string; api_key?: string }) =>
     post<{ ok: boolean; latency_ms?: number; reply?: string; error?: string }>("/ai/test", b),
+  aiModels: (providerId: string, baseUrl?: string) =>
+    request<{ models: string[]; detected: boolean; source: string }>(
+      `/ai/providers/${providerId}/models${qs({ base_url: baseUrl })}`),
 };

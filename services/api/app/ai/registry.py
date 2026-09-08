@@ -11,8 +11,10 @@ user_preferences; keys are never returned to the browser).
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
+import tempfile
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -162,6 +164,78 @@ def resolve_provider_from_pref(ai: dict) -> AIProvider:
     api_key = ai.get("api_key") or (settings.ai_api_key if preset.id == "openai" else "")
     model = ai.get("model") or preset.default_model or settings.ai_model
     return OpenAICompatibleProvider(base_url=base_url, api_key=api_key, model=model)
+
+
+# curated fallbacks for CLIs that don't expose a list command
+CLI_MODEL_SUGGESTIONS = {
+    "claude": ["sonnet", "opus", "haiku"],
+    "codex": ["gpt-5", "gpt-5-codex", "codex-mini-latest", "o4-mini"],
+}
+
+_models_cache: dict[str, tuple[float, list[str]]] = {}
+_MODELS_TTL = 60.0
+
+
+async def discover_models(preset_id: str, base_url: str = "", api_key: str = "") -> dict:
+    """Best-effort model discovery for a provider. Always returns a list;
+    `detected` tells the UI whether a live source was found."""
+    preset = PRESET_BY_ID.get(preset_id)
+    if preset is None or preset.id == "mock":
+        return {"models": ["mock"], "detected": True, "source": "static"}
+
+    cache_key = f"{preset_id}|{base_url}"
+    cached = _models_cache.get(cache_key)
+    if cached and time.monotonic() - cached[0] < _MODELS_TTL:
+        return {"models": cached[1], "detected": True, "source": "cache"}
+
+    models: list[str] = []
+    detected = False
+
+    if preset.kind == "cli":
+        if preset.command == "opencode" and shutil.which("opencode"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "opencode", "models", stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL, cwd=tempfile.gettempdir(),
+                )
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+                models = [l.strip() for l in out.decode().splitlines() if "/" in l]
+                detected = bool(models)
+            except Exception:
+                detected = False
+        else:
+            detected = shutil.which(preset.command) is not None
+            models = list(CLI_MODEL_SUGGESTIONS.get(preset.command, []))
+        return {"models": models, "detected": detected, "source": "cli"}
+
+    # openai_compatible kinds: GET {base}/models (OpenAI-style), fallback to
+    # Ollama native {host}/api/tags
+    base = (base_url or preset.default_base_url or "").rstrip("/")
+    if not base:
+        return {"models": [], "detected": False, "source": "none"}
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            r = await client.get(f"{base}/models", headers=headers)
+            if r.status_code < 400:
+                data = r.json()
+                models = sorted(m.get("id", "") for m in data.get("data", []) if m.get("id"))
+                detected = True
+    except Exception:
+        pass
+    if not models and base.endswith("/v1"):
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                r = await client.get(f"{base[:-3]}/api/tags")
+                if r.status_code < 400:
+                    models = sorted(m.get("name", "") for m in r.json().get("models", []) if m.get("name"))
+                    detected = True
+        except Exception:
+            pass
+
+    if models:
+        _models_cache[cache_key] = (time.monotonic(), models)
+    return {"models": models, "detected": detected, "source": "live"}
 
 
 async def provider_for_user(db: AsyncSession, user: User) -> AIProvider:
