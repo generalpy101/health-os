@@ -1,0 +1,19 @@
+{
+  "name": "HealthOS — Personal Health & Fitness OS",
+  "short_name": "HealthOS",
+  "description": "AI-native personal health and fitness operating system.",
+  "start_url": "/today",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#14110d",
+  "theme_color": "#14110d",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

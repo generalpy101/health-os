@@ -1,0 +1,251 @@
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  timezone: string;
+  units: "metric" | "imperial";
+}
+
+export interface Profile {
+  height_cm: number | null;
+  birth_year: number | null;
+  sex: string | null;
+  activity_level: string | null;
+  dietary: Record<string, unknown>;
+  onboarding_completed: boolean;
+}
+
+export interface Goal {
+  id: string;
+  type: string;
+  title: string;
+  status: string;
+  priority: string;
+  start_value: number | null;
+  target_value: number | null;
+  unit: string | null;
+  start_date: string | null;
+  target_date: string | null;
+  created_at: string;
+}
+
+export interface Target {
+  id: string;
+  key: string;
+  value: number;
+  unit: string;
+  period: string;
+  mode: string;
+  active: boolean;
+}
+
+export interface Food {
+  id: string;
+  name: string;
+  brand: string | null;
+  serving_size: number;
+  serving_unit: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  fiber: number;
+  source: string;
+}
+
+export interface FoodLogItem {
+  food_id: string | null;
+  name: string;
+  quantity: number;
+  unit: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  fiber: number;
+  estimated?: boolean;
+  unmatched?: boolean;
+}
+
+export interface FoodLog {
+  id: string;
+  date: string;
+  meal_type: string;
+  items: FoodLogItem[];
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  fiber: number;
+  note: string | null;
+  created_at: string;
+}
+
+export interface NutritionDay {
+  date: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  fiber: number;
+  logs: FoodLog[];
+  targets: { calories?: number; protein?: number };
+}
+
+export interface Recipe {
+  id: string;
+  name: string;
+  description: string | null;
+  servings: number;
+  prep_minutes: number | null;
+  cook_minutes: number | null;
+  ingredients: FoodLogItem[];
+  steps: string[];
+  nutrition: { per_serving: { calories: number; protein: number; carbs: number; fat: number } };
+  tags: string[];
+  cuisine: string | null;
+  created_at: string;
+}
+
+export interface Exercise {
+  id: string;
+  name: string;
+  muscle_groups: string[];
+  equipment: string | null;
+  difficulty: string | null;
+}
+
+export interface WorkoutSet {
+  weight?: number;
+  reps?: number;
+  rpe?: number;
+  duration_s?: number;
+  distance_m?: number;
+}
+
+export interface Workout {
+  id: string;
+  date: string;
+  title: string;
+  duration_min: number | null;
+  exercises: { name: string; sets: WorkoutSet[] }[];
+  total_volume: number;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface SleepLog {
+  id: string;
+  date: string;
+  sleep_start: string;
+  sleep_end: string;
+  duration_min: number;
+  quality: number | null;
+}
+
+export interface Measurement {
+  id: string;
+  type: string;
+  value: number;
+  unit: string;
+  date: string;
+  notes: string | null;
+}
+
+export interface Habit {
+  id: string;
+  name: string;
+  frequency: string;
+  target: number | null;
+  unit: string | null;
+  active: boolean;
+}
+
+export interface HabitProgress {
+  habit_id: string;
+  name: string;
+  completed: number;
+  window_days: number;
+  adherence: number;
+  streak: number;
+  today_status: string | null;
+}
+
+export interface ScheduleEvent {
+  id: string;
+  type: string;
+  title: string;
+  start_at: string;
+  end_at: string | null;
+  recurring: boolean;
+  status: string;
+}
+
+export interface WeightTrend {
+  points: { date: string; value: number }[];
+  moving_average: { date: string; value: number }[];
+  weekly_rate: number | null;
+}
+
+export interface DailySummary {
+  date: string;
+  nutrition: { calories: number; protein: number; carbs: number; fat: number; fiber: number };
+  water_ml: number;
+  sleep_minutes: number | null;
+  workout_count: number;
+  workout_volume: number;
+  steps: number;
+  habits_completed: number;
+  habits_total: number;
+  weight: number | null;
+  targets: Record<string, number>;
+  schedule: ScheduleEvent[];
+}
+
+export interface RangeSummary {
+  start: string;
+  end: string;
+  days: number;
+  avg_calories: number | null;
+  avg_protein: number | null;
+  days_food_logged: number;
+  avg_water_ml: number | null;
+  avg_sleep_minutes: number | null;
+  workout_count: number;
+  workout_volume: number;
+  targets: Record<string, number>;
+  calorie_adherence: number | null;
+  protein_adherence: number | null;
+  habit_adherence: number | null;
+  weight: WeightTrend;
+  daily_calories: { date: string; calories: number; protein: number }[];
+}
+
+export interface ChatAction {
+  id: string;
+  tool: string;
+  arguments: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  status: string;
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  actions?: ChatAction[];
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  updated_at: string;
+}
+
+export interface OnboardingProposal {
+  profile: { dietary?: Record<string, unknown>; activity_level?: string };
+  goals: { type: string; title: string; start_value?: number; target_value?: number; unit?: string }[];
+  targets: { key: string; value: number; unit: string; period: string }[];
+  events: { type: string; title: string; bydays?: number[]; hour?: number; end_hour?: number }[];
+  memories: { type: string; key: string; value: string }[];
+  defaults_suggested?: { calories: number; protein_g: number; water_ml: number };
+}
