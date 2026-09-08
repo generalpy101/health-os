@@ -249,6 +249,66 @@ def _mock_tool_calls(message: str) -> tuple[list[ToolCall], str]:
     return calls, "none"
 
 
+def _f(v: Any, digits: int = 0) -> str:
+    try:
+        return f"{float(v):.{digits}f}"
+    except (TypeError, ValueError):
+        return "0"
+
+
+def _tool_reply(tool_msg: dict) -> str:
+    """Human-friendly one-liner after tool execution (mock provider)."""
+    name = tool_msg.get("name", "")
+    try:
+        data = json.loads(tool_msg.get("content") or "{}")
+    except json.JSONDecodeError:
+        return "Done."
+    if "error" in data:
+        return f"That didn't work: {data['error']}"
+    if name == "log_food":
+        logged = data.get("logged", {})
+        unmatched = data.get("unmatched") or []
+        text = f"Logged {logged.get('meal_type', 'meal')} — {_f(logged.get('calories'))} kcal, {_f(logged.get('protein'))}g protein."
+        if unmatched:
+            text += f" No nutrition data for: {', '.join(unmatched)} — add them as custom foods for exact numbers."
+        return text
+    if name == "log_water":
+        return f"Logged. Today's total: {_f(data.get('today_total_ml'))} ml."
+    if name == "record_measurement":
+        r = data.get("recorded", {})
+        return f"Recorded {r.get('type', 'measurement')}: {r.get('value')} {r.get('unit', '')}."
+    if name == "log_sleep_hours" or name == "log_sleep_times" or name == "log_sleep":
+        mins = int(float(data.get("logged", {}).get("duration_min") or 0))
+        return f"Sleep logged: {mins // 60}h {mins % 60}m."
+    if name == "create_target":
+        c = data.get("created", {})
+        period_word = {"daily": "day", "weekly": "week", "monthly": "month"}.get(str(c.get("period", "daily")), "day")
+        return f"Target set: {c.get('key', '').replace('_', ' ')} {c.get('value')} {c.get('unit', '')} per {period_word}."
+    if name == "create_goal":
+        return f"Goal created: {data.get('created', {}).get('title', '')}."
+    if name == "create_habit":
+        return f"Habit created: {data.get('created', {}).get('name', '')}."
+    if name == "log_habit_by_name":
+        return f"Marked done: {data.get('habit', '')}."
+    if name == "log_workout":
+        r = data.get("logged", {})
+        return f"Workout logged — {r.get('title', '')}, {_f(r.get('total_volume'))} kg volume."
+    if name == "create_schedule_event":
+        r = data.get("created", {})
+        return f"Scheduled: {r.get('title', '')}."
+    if name == "get_daily_summary":
+        n = data.get("nutrition", {})
+        return (f"Today so far: {_f(n.get('calories'))} kcal, {_f(n.get('protein'))}g protein, "
+                f"{_f(data.get('water_ml'))}ml water, {data.get('workout_count', 0)} workout(s), "
+                f"habits {data.get('habits_completed', 0)}/{data.get('habits_total', 0)}.")
+    if name == "get_weight_trend":
+        if data.get("points", 0) > 0:
+            return (f"Weight: {data.get('latest', {}).get('value')} kg "
+                    f"({float(data.get('change') or 0):+.1f} kg over the period, {float(data.get('weekly_rate') or 0):+.2f} kg/week).")
+        return "No weight entries yet — log your weight and I'll chart the trend."
+    return "Done."
+
+
 FINAL_REPLIES = {
     "water": "Logged your water intake. Anything else?",
     "weight": "Weight recorded. You'll see it on your progress chart.",
@@ -268,12 +328,18 @@ class MockProvider(AIProvider):
     name = "mock"
 
     async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> ProviderResponse:
+        # second pass: tools already ran — produce the final natural-language reply
+        if messages and messages[-1].get("role") == "tool":
+            trailing = []
+            for m in reversed(messages):
+                if m.get("role") != "tool":
+                    break
+                trailing.append(m)
+            parts = [_tool_reply(m) for m in reversed(trailing)]
+            text = "\n".join(dict.fromkeys(parts))  # dedupe, keep order
+            return ProviderResponse(text=text, model="mock")
         last = next((m for m in reversed(messages) if m.get("role") == "user"), None)
-        # second pass: after tool results, produce the final natural-language reply
         if last is None:
-            tool_msgs = [m for m in messages if m.get("role") == "tool"]
-            if tool_msgs:
-                return ProviderResponse(text=tool_msgs[-1].get("content", "Done."), model="mock")
             return ProviderResponse(text="Done.", model="mock")
 
         calls, hint = _mock_tool_calls(last["content"])

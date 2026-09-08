@@ -16,7 +16,7 @@ from ..services import analytics as analytics_service
 from ..services import goals as goals_service
 from ..utils.time import user_now
 from .provider import AIProvider, get_provider
-from .tools import REGISTRY, execute_tool, tool_schemas
+from .tools import REGISTRY, _s, execute_tool, tool_schemas
 
 SYSTEM_PROMPT = """You are the assistant inside a personal health & fitness OS.
 You operate the app through tools — never invent numbers; use tools to read real data
@@ -107,13 +107,19 @@ async def chat(db: AsyncSession, user: User, message: str, conversation_id: UUID
                          "tool_calls": [{"id": c.id, "type": "function",
                                          "function": {"name": c.name, "arguments": json.dumps(c.arguments)}}
                                         for c in resp.tool_calls]})
+        seen_calls: set[str] = set()
         for call in resp.tool_calls:
+            # guard: skip exact duplicate tool invocations within one turn
+            fingerprint = f"{call.name}:{json.dumps(call.arguments, sort_keys=True)}"
+            if fingerprint in seen_calls:
+                continue
+            seen_calls.add(fingerprint)
             latency = int((time.perf_counter() - started) * 1000)
             result = await execute_tool(db, user, call.name, call.arguments)
             risk = REGISTRY.get(call.name, (None, None, "low"))[2]
             status = "failed" if "error" in result else "executed"
             action = AIAction(user_id=user.id, conversation_id=conv.id, tool=call.name,
-                              arguments=call.arguments, result=result, status=status,
+                              arguments=_s(call.arguments), result=_s(result), status=status,
                               model=resp.model or settings.ai_model, provider=provider.name,
                               latency_ms=latency)
             db.add(action)
@@ -185,7 +191,7 @@ async def parse_onboarding(db: AsyncSession, user: User, text: str) -> dict:
         targets.append({"key": "workouts", "value": n, "unit": "sessions", "period": "weekly", "mode": "minimum"})
         days = [0, 2, 4, 6, 1, 3, 5][:n]
         events.append({"type": "workout", "title": "Gym session", "bydays": sorted(days), "hour": 18})
-    m = re.search(r"swim(?:ming)?\s+(\w+)\s*(?:times?|days?)\s+a\s+week", t)
+    m = re.search(r"swim(?:ming)?\s+(\w+)\s*(?:times?|days?)?\s*a\s+week", t)
     if m:
         n = NUMBER_WORDS.get(m.group(1), 2)
         targets.append({"key": "swimming", "value": n, "unit": "sessions", "period": "weekly", "mode": "minimum"})

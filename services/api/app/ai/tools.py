@@ -26,9 +26,10 @@ LOW, MEDIUM, HIGH = "low", "medium", "high"
 
 def _s(v: Any) -> Any:
     """Make values JSON-safe."""
+    import uuid
     if isinstance(v, (datetime, date)):
         return v.isoformat()
-    if hasattr(v, "hex") and not isinstance(v, str):
+    if isinstance(v, uuid.UUID):
         return str(v)
     if isinstance(v, dict):
         return {k: _s(x) for k, x in v.items()}

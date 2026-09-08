@@ -42,10 +42,24 @@ async def _resolve_item(db: AsyncSession, user: User, item: dict) -> dict:
         food = await db.get(Food, item["food_id"])
         if food and food.user_id not in (None, user.id):
             food = None
+    exact = True
     if food is None:
-        matches = await search_foods(db, user, out["name"], limit=1)
-        if matches and matches[0].name.lower() == out["name"].lower():
-            food = matches[0]
+        name_l = out["name"].lower().strip()
+        singular = name_l.rstrip("s")
+        matches = await search_foods(db, user, out["name"], limit=8)
+        if not matches and singular != name_l:
+            matches = await search_foods(db, user, singular, limit=8)
+        exact_match = next(
+            (f for f in matches if f.name.lower() in (name_l, singular)
+             or f.name.lower().split(" (")[0] in (name_l, singular)),
+            None,
+        )
+        if exact_match is not None:
+            food = exact_match
+        elif matches:
+            # fuzzy: prefer the shortest (most generic) match, flagged as an estimate
+            food = min(matches, key=lambda f: len(f.name))
+            exact = False
     if food is not None:
         out["food_id"] = str(food.id)
         out.update(metrics.scale_nutrients(
@@ -53,7 +67,9 @@ async def _resolve_item(db: AsyncSession, user: User, item: dict) -> dict:
              "carbs": food.carbs, "fat": food.fat, "fiber": food.fiber},
             item["quantity"], item.get("unit", "g"),
         ))
-        out["estimated"] = False
+        out["estimated"] = not exact
+        if not exact:
+            out["confidence"] = 0.6
     else:
         # Unknown food: explicit zero snapshot, flagged as unverified — never invent numbers.
         out.update({"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0, "fiber": 0.0,
