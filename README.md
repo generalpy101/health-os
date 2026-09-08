@@ -100,6 +100,12 @@ All under `/api/v1`: `auth/*`, `users/me*` (+ `users/me/export`, `DELETE /users/
 `ai/onboarding/*`, `ai/providers`, `ai/settings`, `ai/test`, `ai/recommendations`, `photos*`,
 `notifications`. OpenAPI docs at `http://localhost:8000/docs` when the API runs.
 
+## Device sync (Apple Health etc.)
+
+Any source that can HTTP POST can push metrics into HealthOS via the ingest API
+(Bearer-token authed, idempotent). iPhone: auto-sync steps/weight/water from Apple Health with
+iOS Shortcuts — full walkthrough in [docs/IOS_SHORTCUT.md](docs/IOS_SHORTCUT.md).
+
 ## Not a medical device
 
 Wellness tracking only. No diagnosis, no prescriptions — the assistant points to professionals
