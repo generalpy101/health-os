@@ -361,6 +361,18 @@ class Recommendation(TimestampMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
 
 
+class Photo(TimestampMixin, Base):
+    __tablename__ = "photos"
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, sa.ForeignKey("users.id"), index=True)
+    category: Mapped[str] = mapped_column(sa.String(24), default="other")  # progress|meal|body|document|other
+    storage_key: Mapped[str] = mapped_column(sa.String(300))
+    content_type: Mapped[str] = mapped_column(sa.String(80))
+    size: Mapped[int] = mapped_column(sa.Integer, default=0)
+    notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    date: Mapped[date | None] = mapped_column(sa.Date, nullable=True)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)

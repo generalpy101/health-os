@@ -6,7 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .db import SessionLocal, engine
 from .migrate import run_migrations
-from .routers import ai, analytics, auth, fitness, goals, health, nutrition, recipes, schedule, users
+from .ratelimit import RateLimitMiddleware
+from .routers import (ai, analytics, auth, fitness, goals, health, notifications, nutrition,
+                      photos, recipes, schedule, users)
 from .seed import seed
 
 
@@ -42,6 +44,10 @@ app.include_router(health.router, prefix=API)
 app.include_router(schedule.router, prefix=API)
 app.include_router(analytics.router, prefix=API)
 app.include_router(ai.router, prefix=API)
+app.include_router(photos.router, prefix=API)
+app.include_router(notifications.router, prefix=API)
+
+app.add_middleware(RateLimitMiddleware)
 
 
 @app.get("/healthz")

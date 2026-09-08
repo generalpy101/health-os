@@ -147,6 +147,8 @@ async def onboarding_commit(data: OnboardingCommitIn, user: User = Depends(curre
 
 @router.get("/recommendations", response_model=list[RecommendationOut])
 async def list_recommendations(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    from ..services import recommendations as recs_service
+    await recs_service.refresh_recommendations(db, user)
     result = await db.execute(
         select(Recommendation).where(Recommendation.user_id == user.id, Recommendation.status == "open")
         .order_by(Recommendation.created_at.desc()).limit(20)
