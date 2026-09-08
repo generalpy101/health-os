@@ -4,15 +4,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .db import SessionLocal, engine, init_db
+from .db import SessionLocal, engine
+from .migrate import run_migrations
 from .routers import ai, analytics, auth, fitness, goals, health, nutrition, recipes, schedule, users
 from .seed import seed
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db()
     settings = get_settings()
+    await run_migrations()
     if settings.seed_on_startup:
         async with SessionLocal() as db:
             await seed(db)
