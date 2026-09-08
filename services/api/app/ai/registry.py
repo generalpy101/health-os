@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -167,13 +168,37 @@ def resolve_provider_from_pref(ai: dict) -> AIProvider:
 
 
 # curated fallbacks for CLIs that don't expose a list command
+# (aliases first — they always resolve to the provider's latest; full IDs after)
 CLI_MODEL_SUGGESTIONS = {
-    "claude": ["sonnet", "opus", "haiku"],
-    "codex": ["gpt-5", "gpt-5-codex", "codex-mini-latest", "o4-mini"],
+    "claude": ["sonnet", "opus", "haiku",
+               "claude-sonnet-4-5", "claude-opus-4-5", "claude-opus-4-6", "claude-opus-4-7",
+               "claude-haiku-4-5", "claude-fable-5", "claude-mythos-5"],
+    "codex": ["gpt-5", "gpt-5-codex", "gpt-5.1", "codex-mini-latest", "o4-mini"],
 }
 
 _models_cache: dict[str, tuple[float, list[str]]] = {}
 _MODELS_TTL = 60.0
+
+
+async def _cli_models_claude() -> list[str] | None:
+    """Live alias discovery via `claude -p /model` (prints 'Available: ...')."""
+    if not shutil.which("claude"):
+        return None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "claude", "-p", "/model", stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL, cwd=tempfile.gettempdir(),
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
+        text = out.decode(errors="replace")
+        m = re.search(r"Available:\s*(.+?)(?:\.|$)", text, re.S)
+        if not m:
+            return None
+        aliases = [a.strip() for a in m.group(1).split(",")]
+        # drop meta-entries; keep aliases (full IDs remain free-text)
+        return [a for a in aliases if a and "model ID" not in a and a != "default"]
+    except Exception:
+        return None
 
 
 async def discover_models(preset_id: str, base_url: str = "", api_key: str = "") -> dict:
@@ -181,12 +206,13 @@ async def discover_models(preset_id: str, base_url: str = "", api_key: str = "")
     `detected` tells the UI whether a live source was found."""
     preset = PRESET_BY_ID.get(preset_id)
     if preset is None or preset.id == "mock":
-        return {"models": ["mock"], "detected": True, "source": "static"}
+        return {"models": ["mock"], "detected": True, "source": "static", "default": "mock"}
 
     cache_key = f"{preset_id}|{base_url}"
     cached = _models_cache.get(cache_key)
     if cached and time.monotonic() - cached[0] < _MODELS_TTL:
-        return {"models": cached[1], "detected": True, "source": "cache"}
+        return {"models": cached[1], "detected": True, "source": "cache",
+                "default": preset.default_model or cached[1][0]}
 
     models: list[str] = []
     detected = False
@@ -203,16 +229,25 @@ async def discover_models(preset_id: str, base_url: str = "", api_key: str = "")
                 detected = bool(models)
             except Exception:
                 detected = False
+        elif preset.command == "claude":
+            live = await _cli_models_claude()
+            if live:
+                models = live
+                detected = True
+            else:
+                models = list(CLI_MODEL_SUGGESTIONS["claude"])
+                detected = shutil.which("claude") is not None
         else:
             detected = shutil.which(preset.command) is not None
             models = list(CLI_MODEL_SUGGESTIONS.get(preset.command, []))
-        return {"models": models, "detected": detected, "source": "cli"}
+        return {"models": models, "detected": detected, "source": "cli",
+                "default": "CLI default" if preset.command in ("claude", "codex", "opencode") else models[0] if models else ""}
 
     # openai_compatible kinds: GET {base}/models (OpenAI-style), fallback to
     # Ollama native {host}/api/tags
     base = (base_url or preset.default_base_url or "").rstrip("/")
     if not base:
-        return {"models": [], "detected": False, "source": "none"}
+        return {"models": [], "detected": False, "source": "none", "default": preset.default_model}
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
@@ -235,7 +270,7 @@ async def discover_models(preset_id: str, base_url: str = "", api_key: str = "")
 
     if models:
         _models_cache[cache_key] = (time.monotonic(), models)
-    return {"models": models, "detected": detected, "source": "live"}
+    return {"models": models, "detected": detected, "source": "live", "default": preset.default_model}
 
 
 async def provider_for_user(db: AsyncSession, user: User) -> AIProvider:

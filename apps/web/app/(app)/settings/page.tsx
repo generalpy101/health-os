@@ -1,12 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Moon, RefreshCw, Sun, Trash2 } from "lucide-react";
+import { Download, Moon, Sun, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { TopBar } from "@/components/nav";
 import { useAiProviders, useAiSettings } from "@/components/ai-picker";
-import { Button, Card, CardTitle, Field, Input, Select, Sheet, Spinner, useToast } from "@/components/ui";
+import { ComboBox } from "@/components/combobox";
+import { Button, Card, CardTitle, Field, Input, Select, Sheet, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
 import { GOAL_TYPES, cx } from "@/lib/utils";
 
@@ -236,32 +237,43 @@ function ModelPicker({ providerId, kind, model, setModel, baseUrl, placeholder }
     queryFn: () => api.aiModels(providerId, baseUrl || undefined),
     staleTime: 60_000,
   });
-  const listId = `models-${providerId}`;
+  const defaultLabel = data?.default ? `Default (${data.default})` : "Provider default";
+  const options = [ ...(data?.models || []) ];
   return (
     <Field
-      label={kind === "cli" ? "Model (optional — CLI default if empty)" : "Model"}
+      label="Model"
       hint={
         data?.detected
-          ? `${data.models.length} model${data.models.length === 1 ? "" : "s"} discovered — pick one or type your own`
-          : "No live model list — type a model name"
+          ? `${options.length} model${options.length === 1 ? "" : "s"} discovered — pick, search, or type any name`
+          : "No live model list right now — the default or any typed name still works"
       }
     >
-      <div className="flex gap-2">
-        <Input
-          list={listId}
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder={placeholder}
-          autoComplete="off"
-        />
-        <datalist id={listId}>
-          {(data?.models || []).map((m) => <option key={m} value={m} />)}
-        </datalist>
-        <Button type="button" variant="outline" size="md" onClick={() => refetch()} disabled={isFetching}
-                title="Re-discover models" aria-label="Re-discover models">
-          {isFetching ? <Spinner className="h-4 w-4" /> : <RefreshCw size={15} />}
-        </Button>
-      </div>
+      <ComboBox
+        value={model}
+        onChange={setModel}
+        options={options}
+        defaultOption={defaultLabel}
+        placeholder={placeholder}
+        onRefresh={() => refetch()}
+        refreshing={isFetching}
+        note={
+          data?.detected
+            ? `${options.length} discovered · default: ${data?.default || "provider default"}`
+            : `default: ${data?.default || "provider default"} · free text allowed`
+        }
+      />
+      {model !== "" && (
+        <button
+          type="button"
+          onClick={() => setModel("")}
+          className="mt-1.5 text-xs font-medium text-accent hover:underline"
+        >
+          Reset to {defaultLabel}
+        </button>
+      )}
+      {model === "" && (
+        <p className="mt-1.5 text-xs text-faint">Using {defaultLabel}</p>
+      )}
     </Field>
   );
 }
