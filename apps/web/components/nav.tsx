@@ -99,9 +99,9 @@ export function BottomNav() {
 export function TopBar({ title, right }: { title: string; right?: React.ReactNode }) {
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-bg/85 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
-        <h1 className="font-display text-lg font-semibold tracking-tight">{title}</h1>
-        <div className="flex items-center gap-2">
+      <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-2 px-4 sm:px-6">
+        <h1 className="min-w-0 truncate font-display text-lg font-semibold tracking-tight">{title}</h1>
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           {right}
           <NotificationsBell />
         </div>

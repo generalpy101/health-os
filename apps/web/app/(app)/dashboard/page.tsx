@@ -258,7 +258,7 @@ function RecommendationsWidget() {
       {!recs?.length ? (
         <p className="text-sm text-faint">Nothing to flag right now — keep logging and I&rsquo;ll spot patterns.</p>
       ) : (
-        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))" }}>
           {recs.slice(0, 3).map((r) => (
             <div key={r.id} className="rounded-xl border border-line bg-surface-2/40 p-3.5">
               <div className="flex items-start justify-between gap-2">

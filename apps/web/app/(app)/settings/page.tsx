@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { TopBar } from "@/components/nav";
 import { useAiProviders, useAiSettings } from "@/components/ai-picker";
+import { AppearanceCard } from "@/components/appearance";
 import { ComboBox } from "@/components/combobox";
 import { Button, Card, CardTitle, Field, Input, Select, Sheet, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -76,19 +77,20 @@ export default function SettingsPage() {
 
   return (
     <>
-      <TopBar
-        title="Settings"
-        right={
-          <button
-            onClick={() => switchTheme(theme === "dark" ? "light" : "dark")}
-            aria-label="Toggle theme"
-            className="rounded-xl border border-line bg-surface p-2.5 text-muted hover:text-ink"
-          >
-            {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-          </button>
-        }
-      />
+      <TopBar title="Settings" />
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-5 sm:px-6">
+        <AppearanceCard
+          right={
+            <button
+              onClick={() => switchTheme(theme === "dark" ? "light" : "dark")}
+              aria-label="Toggle theme"
+              className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-[13px] font-medium text-muted hover:text-ink"
+            >
+              {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+              {theme === "dark" ? "Light" : "Dark"}
+            </button>
+          }
+        />
         <Card>
           <CardTitle>Profile</CardTitle>
           {me && profile && (

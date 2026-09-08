@@ -34,9 +34,12 @@ export default function NutritionPage() {
       <TopBar
         title="Nutrition"
         right={
-          <div className="flex items-center gap-2">
-            <Input type="date" value={day} onChange={(e) => setDay(e.target.value)} className="h-9 w-auto text-sm" />
-            <Button size="sm" onClick={() => setLogOpen(true)}><Plus size={15} /> Log food</Button>
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <Input type="date" value={day} onChange={(e) => setDay(e.target.value)}
+                   className="h-9 w-[7.6rem] px-2 text-xs sm:w-auto sm:px-3.5 sm:text-sm" />
+            <Button size="sm" onClick={() => setLogOpen(true)} aria-label="Log food">
+              <Plus size={15} /><span className="hidden sm:inline">Log food</span>
+            </Button>
           </div>
         }
       />

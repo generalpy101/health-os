@@ -50,6 +50,27 @@
   --ring: rgba(240, 102, 47, 0.45);
 }
 
+/* font themes — switched by [data-font] on <html> */
+:root {
+  --fd: var(--font-fraunces), Georgia, serif;
+  --fb: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
+[data-font="athletic"] {
+  --fd: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --fb: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+}
+
+[data-font="system"] {
+  --fd: ui-serif, Georgia, serif;
+  --fb: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+[data-font="readable"] {
+  --fd: var(--font-atkinson), ui-sans-serif, sans-serif;
+  --fb: var(--font-atkinson), ui-sans-serif, sans-serif;
+}
+
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);
@@ -71,14 +92,15 @@
   --color-berry-soft: var(--berry-soft);
   --color-good: var(--good);
   --color-bad: var(--bad);
-  --font-display: var(--font-fraunces), Georgia, serif;
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--fd);
+  --font-sans: var(--fb);
   --radius-lg: 1rem;
   --radius-md: 0.75rem;
 }
 
 html {
   background: var(--bg);
+  overflow-x: clip;
 }
 
 body {
@@ -87,6 +109,7 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  overflow-x: clip;
 }
 
 .font-display {
