@@ -1,12 +1,12 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRef, useState } from "react";
 import {
   Bar, BarChart, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { TopBar } from "@/components/nav";
-import { Card, CardTitle, Empty, PageLoading, Segmented, Stat } from "@/components/ui";
+import { Button, Card, CardTitle, Empty, PageLoading, Segmented, Stat, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDate, fmtDuration, fmtNumber } from "@/lib/utils";
 
@@ -105,6 +105,8 @@ export default function ProgressPage() {
               </div>
             </Card>
 
+            <MeasurementExplorer />
+
             <Card>
               <CardTitle>Nutrition by day</CardTitle>
               {data.daily_calories.length === 0 ? (
@@ -143,5 +145,106 @@ function ChartTip({ active, payload, label, unit }: { active?: boolean; payload?
         </div>
       ))}
     </div>
+  );
+}
+
+const MEASURE_TYPES = ["weight", "body_fat", "waist", "chest", "arms", "hips", "neck"];
+
+function MeasurementExplorer() {
+  const [type, setType] = useState("weight");
+  const { data } = useQuery({
+    queryKey: ["measurements", type],
+    queryFn: () => api.measurements(type, 180),
+  });
+  const [uploading, setUploading] = useState(false);
+  const queryClient = useQueryClient();
+  const { data: photos } = useQuery({ queryKey: ["photos", "progress"], queryFn: () => api.photos("progress") });
+  const toast = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const points = (data || []).map((m) => ({ date: m.date, value: m.value }));
+  const unit = data?.[0]?.unit || (type === "body_fat" ? "%" : type === "weight" ? "kg" : "cm");
+
+  return (
+    <>
+      <Card>
+        <CardTitle
+          right={
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className="rounded-lg border border-line bg-surface px-2 py-1 text-xs font-medium capitalize text-muted focus:outline-none"
+            >
+              {MEASURE_TYPES.map((t) => <option key={t} value={t}>{t.replace("_", " ")}</option>)}
+            </select>
+          }
+        >
+          Measurements
+        </CardTitle>
+        {points.length === 0 ? (
+          <Empty title={`No ${type.replace("_", " ")} data`} hint="Log measurements from the + button." />
+        ) : (
+          <div className="h-44">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={points} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
+                <CartesianGrid stroke="var(--line)" strokeDasharray="2 6" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fontSize: 11, fill: "var(--faint)" }} tickLine={false} axisLine={false} minTickGap={40} />
+                <YAxis domain={["dataMin", "dataMax"]} tick={{ fontSize: 11, fill: "var(--faint)" }} tickLine={false} axisLine={false} width={44} />
+                <Tooltip content={<ChartTip unit={unit} />} />
+                <Line type="monotone" dataKey="value" stroke="var(--lake)" strokeWidth={2} dot={{ r: 2.5, fill: "var(--lake)", strokeWidth: 0 }} name={type} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <CardTitle
+          right={
+            <>
+              <input
+                ref={fileRef} type="file" accept="image/*" className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  setUploading(true);
+                  try {
+                    await api.uploadPhoto(file, "progress");
+                    queryClient.invalidateQueries({ queryKey: ["photos"] });
+                    toast("Photo added");
+                  } catch (err) {
+                    toast(err instanceof Error ? err.message : "Upload failed", "err");
+                  } finally {
+                    setUploading(false);
+                    e.target.value = "";
+                  }
+                }}
+              />
+              <Button size="sm" variant="outline" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                {uploading ? "Uploading…" : "+ Photo"}
+              </Button>
+            </>
+          }
+        >
+          Progress photos
+        </CardTitle>
+        {!photos?.length ? (
+          <p className="text-sm text-faint">Add a photo monthly — trends you can see beat numbers you can imagine.</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+            {photos.map((p) => (
+              <a key={p.id} href={api.photoUrl(p.id)} target="_blank" rel="noreferrer" className="group relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={api.photoUrl(p.id)} alt={p.notes || "Progress photo"}
+                     className="aspect-square w-full rounded-xl border border-line object-cover" />
+                <span className="absolute bottom-1 left-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                  {p.date ? fmtDate(p.date) : ""}
+                </span>
+              </a>
+            ))}
+          </div>
+        )}
+      </Card>
+    </>
   );
 }

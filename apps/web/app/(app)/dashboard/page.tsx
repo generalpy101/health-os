@@ -7,10 +7,10 @@ import { TopBar } from "@/components/nav";
 import { Button, Card, CardTitle, PageLoading, ProgressBar, ProgressRing, Sheet, Stat } from "@/components/ui";
 import { api } from "@/lib/api";
 import type { DailySummary, Goal } from "@/lib/types";
-import { fmtDuration, fmtMl, fmtNumber } from "@/lib/utils";
+import { cx, fmtDuration, fmtMl, fmtNumber } from "@/lib/utils";
 
 // Safe widget registry — dashboards are data, widgets come from here only.
-const WIDGETS = ["nutrition_rings", "water", "weight", "sleep", "workouts_week", "habits", "goals", "schedule_today"] as const;
+const WIDGETS = ["nutrition_rings", "water", "weight", "sleep", "workouts_week", "habits", "goals", "schedule_today", "recommendations"] as const;
 type WidgetType = (typeof WIDGETS)[number];
 
 const WIDGET_META: Record<WidgetType, { title: string }> = {
@@ -22,9 +22,10 @@ const WIDGET_META: Record<WidgetType, { title: string }> = {
   habits: { title: "Habits" },
   goals: { title: "Active goals" },
   schedule_today: { title: "Today" },
+  recommendations: { title: "Recommendations" },
 };
 
-const DEFAULT_LAYOUT: WidgetType[] = ["nutrition_rings", "water", "weight", "habits", "goals", "workouts_week"];
+const DEFAULT_LAYOUT: WidgetType[] = ["nutrition_rings", "water", "weight", "habits", "goals", "workouts_week", "recommendations"];
 
 function useLayout() {
   const { data: prefs } = useQuery({ queryKey: ["preferences"], queryFn: api.preferences });
@@ -217,6 +218,8 @@ function WidgetRenderer({
           )}
         </Card>
       );
+    case "recommendations":
+      return <RecommendationsWidget />;
     case "schedule_today":
       return (
         <Card>
@@ -236,6 +239,59 @@ function WidgetRenderer({
         </Card>
       );
   }
+}
+
+function RecommendationsWidget() {
+  const queryClient = useQueryClient();
+  const { data: recs } = useQuery({ queryKey: ["recommendations"], queryFn: api.recommendations });
+  const respond = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) => api.updateRecommendation(id, status),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["recommendations"] }),
+  });
+  return (
+    <Card className="sm:col-span-2 lg:col-span-3">
+      <CardTitle
+        right={<span className="text-[10px] normal-case tracking-normal text-faint">from your real data — refreshed every few hours</span>}
+      >
+        Recommendations
+      </CardTitle>
+      {!recs?.length ? (
+        <p className="text-sm text-faint">Nothing to flag right now — keep logging and I&rsquo;ll spot patterns.</p>
+      ) : (
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+          {recs.slice(0, 3).map((r) => (
+            <div key={r.id} className="rounded-xl border border-line bg-surface-2/40 p-3.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="text-sm font-semibold leading-snug">{r.title}</div>
+                <span className={cx(
+                  "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase",
+                  r.priority === "high" ? "bg-accent-soft text-accent" : "bg-gold-soft text-gold"
+                )}>
+                  {Math.round(r.confidence * 100)}%
+                </span>
+              </div>
+              {r.reason && <p className="mt-1.5 text-xs leading-relaxed text-muted">{r.reason}</p>}
+              {(r.actions as { text?: string; href?: string }[])?.map((a, i) => (
+                <div key={i} className="mt-1.5 text-xs font-medium text-olive">
+                  {a.href ? <a href={a.href} className="underline">{a.text}</a> : a.text}
+                </div>
+              ))}
+              <div className="mt-2.5 flex gap-1.5">
+                <button onClick={() => respond.mutate({ id: r.id, status: "accepted" })}
+                        className="rounded-lg bg-olive-soft px-2.5 py-1 text-[11px] font-semibold text-olive hover:brightness-95">
+                  Accept
+                </button>
+                <button onClick={() => respond.mutate({ id: r.id, status: "rejected" })}
+                        className="rounded-lg bg-surface-2 px-2.5 py-1 text-[11px] font-semibold text-muted hover:text-ink">
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
 }
 
 function GoalRow({ goal }: { goal: Goal }) {

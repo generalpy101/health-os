@@ -1,11 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Moon, Sun, Trash2 } from "lucide-react";
+import { Download, Moon, Sun, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { TopBar } from "@/components/nav";
-import { ProviderPicker, useAiProviders, useAiSettings } from "@/components/ai-picker";
-import { Button, Card, CardTitle, Field, Input, Select, useToast } from "@/components/ui";
+import { useAiProviders, useAiSettings } from "@/components/ai-picker";
+import { Button, Card, CardTitle, Field, Input, Select, Sheet, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
 import { GOAL_TYPES, cx } from "@/lib/utils";
 
@@ -198,6 +199,8 @@ export default function SettingsPage() {
 
         <AISettingsCard />
 
+        <PrivacyCard />
+
         <Card>
           <CardTitle>What the AI remembers</CardTitle>
           {!memories?.length ? (
@@ -221,6 +224,73 @@ export default function SettingsPage() {
         </Card>
       </main>
     </>
+  );
+}
+
+function PrivacyCard() {
+  const router = useRouter();
+  const toast = useToast();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const queryClient = useQueryClient();
+
+  async function downloadExport() {
+    try {
+      const data = await api.exportData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `healthos-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast("Export downloaded");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Export failed", "err");
+    }
+  }
+
+  return (
+    <Card>
+      <CardTitle>Your data</CardTitle>
+      <p className="mb-3 text-sm leading-relaxed text-muted">
+        Self-hosted — everything lives in your own database. Export anytime; delete forever if you want out.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" onClick={downloadExport}>
+          <Download size={15} /> Export all data (JSON)
+        </Button>
+        <Button variant="danger" onClick={() => setConfirmOpen(true)}>
+          <Trash2 size={15} /> Delete account
+        </Button>
+      </div>
+      <Sheet open={confirmOpen} onClose={() => setConfirmOpen(false)} title="Delete account?">
+        <p className="text-sm leading-relaxed text-muted">
+          This permanently deletes your account and <strong className="text-ink">all</strong> of it — logs, photos,
+          plans, conversations, history. There is no undo. Type <strong className="text-ink">delete</strong> to confirm.
+        </p>
+        <Input className="mt-4" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="delete" />
+        <div className="mt-4 flex gap-2">
+          <Button variant="outline" className="flex-1" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+          <Button
+            variant="primary"
+            className="flex-1 !bg-bad"
+            disabled={confirmText !== "delete"}
+            onClick={async () => {
+              try {
+                await api.deleteAccount();
+                queryClient.clear();
+                router.replace("/signup");
+              } catch (e) {
+                toast(e instanceof Error ? e.message : "Failed", "err");
+              }
+            }}
+          >
+            Delete everything
+          </Button>
+        </div>
+      </Sheet>
+    </Card>
   );
 }
 

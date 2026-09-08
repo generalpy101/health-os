@@ -30,6 +30,16 @@ export default function AssistantPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
 
+  // command palette hands a message over via sessionStorage
+  useEffect(() => {
+    const pending = sessionStorage.getItem("healthos-pending-chat");
+    if (pending) {
+      sessionStorage.removeItem("healthos-pending-chat");
+      submit(pending);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const send = useMutation({
     mutationFn: (text: string) => api.chat(text, conversationId),
     onSuccess: (res) => {

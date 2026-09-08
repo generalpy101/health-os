@@ -77,10 +77,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(0, "You are offline. This action needs a connection.");
   }
   let res: Response;
+  const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
   try {
     res = await fetch(BASE + path, {
       ...init,
-      headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+      headers: isFormData
+        ? { ...(init?.headers || {}) } // browser sets multipart boundary
+        : { "Content-Type": "application/json", ...(init?.headers || {}) },
     });
   } catch {
     throw new ApiError(0, "Network error. Check your connection.");
@@ -158,7 +161,11 @@ export const api = {
     date?: string;
     meal_type: string;
     note?: string;
-    items: { food_id?: string; name: string; quantity: number; unit: string }[];
+    items: {
+      food_id?: string; name: string; quantity: number; unit: string;
+      calories?: number; protein?: number; carbs?: number; fat?: number; fiber?: number;
+      estimated?: boolean; confidence?: number; lower_kcal?: number; upper_kcal?: number;
+    }[];
   }) => post<FoodLog>("/food-logs", b),
   foodLogs: (day?: string) => request<FoodLog[]>(`/food-logs${qs({ day })}`),
   deleteFoodLog: (id: string) => del(`/food-logs/${id}`),
@@ -168,6 +175,14 @@ export const api = {
   recipes: (q = "") => request<Recipe[]>(`/recipes${qs({ q })}`),
   createRecipe: (b: unknown) => post<Recipe>("/recipes", b),
   deleteRecipe: (id: string) => del(`/recipes/${id}`),
+  mealPlans: (start: string, end: string) =>
+    request<{ id: string; date: string; meal_type: string; recipe_id: string | null; name: string; servings: number; notes: string | null }[]>(
+      `/meal-plans${qs({ start, end })}`),
+  createMealPlan: (b: { date: string; meal_type: string; recipe_id?: string; name: string; servings?: number }) =>
+    post("/meal-plans", b),
+  deleteMealPlan: (id: string) => del(`/meal-plans/${id}`),
+  groceryList: (start: string, end: string) =>
+    request<{ items: { name: string; quantity: number; unit: string }[] }>(`/grocery-list${qs({ start, end })}`),
 
   // fitness
   exercises: (q = "") => request<import("./types").Exercise[]>(`/exercises${qs({ q })}`),
@@ -181,6 +196,32 @@ export const api = {
   workouts: (limit = 30) => request<Workout[]>(`/workout-sessions${qs({ limit })}`),
   deleteWorkout: (id: string) => del(`/workout-sessions/${id}`),
   logActivity: (b: Record<string, unknown>) => post("/activities", b),
+  workoutPlans: () => request<import("./types").WorkoutPlan[]>("/workout-plans"),
+  createWorkoutPlan: (b: { name: string; days: unknown[]; description?: string }) =>
+    post<import("./types").WorkoutPlan>("/workout-plans", b),
+  deleteWorkoutPlan: (id: string) => del(`/workout-plans/${id}`),
+
+  // photos
+  photos: (category?: string) => request<import("./types").PhotoMeta[]>(`/photos${qs({ category })}`),
+  uploadPhoto: (file: File, category: string, notes?: string) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<import("./types").PhotoMeta>(`/photos${qs({ category, notes })}`, {
+      method: "POST", body: fd, headers: {},
+    });
+  },
+  deletePhoto: (id: string) => del(`/photos/${id}`),
+  analyzePhoto: (id: string) =>
+    post<{ ok: boolean; items: { name: string; quantity: number; unit: string; calories_est: number; protein_est: number; confidence: number }[]; message?: string }>(
+      `/photos/${id}/analyze`, {}),
+  photoUrl: (id: string) => `/api/v1/photos/${id}/file`,
+
+  // notifications / privacy
+  notifications: () =>
+    request<{ notifications: { kind: string; priority: string; title: string; reason: string; href: string }[]; count: number; quiet_hours_active: boolean }>(
+      "/notifications"),
+  exportData: () => request<Record<string, unknown>>("/users/me/export"),
+  deleteAccount: () => del("/users/me"),
 
   // health
   logWater: (amount_ml: number) => post<{ id: string }>("/water", { amount_ml }),
@@ -223,6 +264,10 @@ export const api = {
   conversations: () => request<Conversation[]>("/ai/conversations"),
   conversationMessages: (id: string) =>
     request<{ id: string; role: string; content: string }[]>(`/ai/conversations/${id}/messages`),
+  recommendations: () =>
+    request<{ id: string; title: string; reason: string | null; priority: string; confidence: number; actions: unknown[] }[]>(
+      "/ai/recommendations"),
+  updateRecommendation: (id: string, status: string) => patch(`/ai/recommendations/${id}`, { status }),
   parseOnboarding: (text: string) => post<OnboardingProposal>("/ai/onboarding/parse", { text }),
   commitOnboarding: (b: unknown) => post("/ai/onboarding/commit", b),
   aiProviders: () => request<{ providers: import("./types").AIProviderInfo[] }>("/ai/providers"),

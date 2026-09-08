@@ -181,6 +181,16 @@ class FoodLogItemIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     quantity: float = Field(gt=0)
     unit: str = "g"
+    # optional explicit nutrients (user correction / AI photo estimate with uncertainty)
+    calories: float | None = Field(default=None, ge=0)
+    protein: float | None = Field(default=None, ge=0)
+    carbs: float | None = Field(default=None, ge=0)
+    fat: float | None = Field(default=None, ge=0)
+    fiber: float | None = Field(default=None, ge=0)
+    estimated: bool | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    lower_kcal: float | None = Field(default=None, ge=0)
+    upper_kcal: float | None = Field(default=None, ge=0)
 
 
 class FoodLogItemOut(BaseModel):

@@ -134,6 +134,27 @@ export interface Workout {
   created_at: string;
 }
 
+export interface WorkoutPlan {
+  id: string;
+  name: string;
+  description: string | null;
+  days: {
+    name: string;
+    exercises: { name: string; sets?: number; reps?: number; weight?: number }[];
+  }[];
+  active: boolean;
+}
+
+export interface PhotoMeta {
+  id: string;
+  category: string;
+  content_type: string;
+  size: number;
+  notes: string | null;
+  date: string | null;
+  created_at: string;
+}
+
 export interface SleepLog {
   id: string;
   date: string;

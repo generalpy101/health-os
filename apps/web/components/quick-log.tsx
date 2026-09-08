@@ -1,13 +1,14 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Droplet, MessageCircle, Moon, Plus, Scale, UtensilsCrossed } from "lucide-react";
+import { Camera, Droplet, MessageCircle, Moon, Plus, Ruler, Scale, UtensilsCrossed } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { Button, Input, Field, Sheet, useToast } from "@/components/ui";
+import { useRef, useState } from "react";
+import { Button, Input, Field, Select, Sheet, Spinner, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
+import { fmtNumber } from "@/lib/utils";
 
-type Mode = null | "menu" | "food" | "water" | "weight" | "sleep";
+type Mode = null | "menu" | "food" | "water" | "weight" | "sleep" | "photo" | "measure";
 
 export function QuickLog() {
   const [mode, setMode] = useState<Mode>(null);
@@ -26,9 +27,11 @@ export function QuickLog() {
         <div className="grid grid-cols-2 gap-2.5">
           {[
             { icon: UtensilsCrossed, label: "Food", action: () => setMode("food"), tone: "var(--accent)" },
+            { icon: Camera, label: "Meal photo", action: () => setMode("photo"), tone: "var(--accent)" },
             { icon: Droplet, label: "Water", action: () => setMode("water"), tone: "var(--lake)" },
             { icon: Scale, label: "Weight", action: () => setMode("weight"), tone: "var(--gold)" },
             { icon: Moon, label: "Sleep", action: () => setMode("sleep"), tone: "var(--berry)" },
+            { icon: Ruler, label: "Measure", action: () => setMode("measure"), tone: "var(--gold)" },
           ].map((a) => (
             <button
               key={a.label}
@@ -60,7 +63,172 @@ export function QuickLog() {
       <WaterQuickLog open={mode === "water"} onClose={() => setMode(null)} />
       <WeightQuickLog open={mode === "weight"} onClose={() => setMode(null)} />
       <SleepQuickLog open={mode === "sleep"} onClose={() => setMode(null)} />
+      <PhotoQuickLog open={mode === "photo"} onClose={() => setMode(null)} />
+      <MeasureQuickLog open={mode === "measure"} onClose={() => setMode(null)} />
     </>
+  );
+}
+
+const MEASURE_TYPES: [string, string][] = [
+  ["waist", "cm"], ["chest", "cm"], ["arms", "cm"], ["hips", "cm"],
+  ["neck", "cm"], ["body_fat", "%"], ["legs", "cm"],
+];
+
+function MeasureQuickLog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [type, setType] = useState("waist");
+  const [v, setV] = useState("");
+  const done = useDone(onClose);
+  const toast = useToast();
+  const unit = MEASURE_TYPES.find(([t]) => t === type)?.[1] || "cm";
+  return (
+    <Sheet open={open} onClose={onClose} title="Log measurement">
+      <form
+        className="space-y-4"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          const n = parseFloat(v);
+          if (!(n > 0)) return;
+          try {
+            await api.recordMeasurement({ type, value: n, unit });
+            done(`${type.replace("_", " ")}: ${n} ${unit}`);
+          } catch (err) {
+            toast(err instanceof Error ? err.message : "Failed", "err");
+          }
+        }}
+      >
+        <Field label="Type">
+          <Select value={type} onChange={(e) => setType(e.target.value)}>
+            {MEASURE_TYPES.map(([t, u]) => <option key={t} value={t}>{t.replace("_", " ")} ({u})</option>)}
+          </Select>
+        </Field>
+        <Field label={`Value (${unit})`}>
+          <Input autoFocus inputMode="decimal" value={v} onChange={(e) => setV(e.target.value)} placeholder="0" />
+        </Field>
+        <Button type="submit" className="w-full" disabled={!v}>Save</Button>
+      </form>
+    </Sheet>
+  );
+}
+
+interface PhotoEstimate {
+  name: string; quantity: number; unit: string; calories_est: number;
+  protein_est: number; confidence: number; lower_kcal?: number; upper_kcal?: number;
+}
+
+function PhotoQuickLog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [photoId, setPhotoId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [items, setItems] = useState<PhotoEstimate[] | null>(null);
+  const [message, setMessage] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const done = useDone(onClose);
+  const toast = useToast();
+
+  function reset() {
+    setFile(null); setPhotoId(null); setItems(null); setMessage(""); setBusy(false);
+  }
+
+  async function uploadAndAnalyze(f: File) {
+    setBusy(true);
+    setFile(f);
+    try {
+      const photo = await api.uploadPhoto(f, "meal");
+      setPhotoId(photo.id);
+      const res = await api.analyzePhoto(photo.id);
+      if (res.ok && res.items.length) {
+        setItems(res.items);
+      } else {
+        setMessage(res.message || "Could not identify foods — log manually instead.");
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function logItems() {
+    if (!items) return;
+    setBusy(true);
+    try {
+      await api.logFood({
+        meal_type: "other",
+        note: "Photo estimate",
+        items: items.map((i) => ({
+          name: i.name, quantity: i.quantity, unit: i.unit,
+          calories: i.calories_est, protein: i.protein_est,
+          estimated: true, confidence: i.confidence,
+          ...(i.lower_kcal != null ? { lower_kcal: i.lower_kcal } : {}),
+          ...(i.upper_kcal != null ? { upper_kcal: i.upper_kcal } : {}),
+        })),
+      });
+      reset();
+      done("Meal logged from photo");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed", "err");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Sheet open={open} onClose={() => { reset(); onClose(); }} title="Meal photo">
+      <input
+        ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadAndAnalyze(f); e.target.value = ""; }}
+      />
+      {!file ? (
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="flex w-full flex-col items-center gap-2 rounded-2xl border border-dashed border-line py-10 text-muted transition-colors hover:border-accent hover:text-accent"
+        >
+          <Camera size={28} />
+          <span className="text-sm font-medium">Take or choose a photo</span>
+          <span className="text-xs text-faint">AI estimates items with calorie ranges — you review before logging</span>
+        </button>
+      ) : (
+        <div className="space-y-4">
+          {file && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={URL.createObjectURL(file)} alt="Meal" className="max-h-44 w-full rounded-xl object-cover" />
+          )}
+          {busy && !items && (
+            <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted">
+              <Spinner /> Analyzing…
+            </div>
+          )}
+          {message && (
+            <div className="rounded-xl border border-gold/40 bg-gold-soft px-3.5 py-3 text-sm text-gold">{message}</div>
+          )}
+          {items && (
+            <>
+              <div className="space-y-1.5">
+                {items.map((i, idx) => (
+                  <div key={idx} className="flex items-center justify-between rounded-xl border border-line px-3 py-2.5 text-sm">
+                    <span className="font-medium">{i.name} <span className="text-xs text-faint">{i.quantity}{i.unit}</span></span>
+                    <span className="text-right text-xs text-muted">
+                      {i.lower_kcal != null && i.upper_kcal != null
+                        ? <span className="font-semibold text-ink">{fmtNumber(i.lower_kcal)}–{fmtNumber(i.upper_kcal)} kcal</span>
+                        : <span className="font-semibold text-ink">~{fmtNumber(i.calories_est)} kcal</span>}
+                      <span className="block text-faint">confidence {Math.round((i.confidence || 0) * 100)}%</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] leading-relaxed text-faint">
+                These are estimates with uncertainty — totals land in your log marked as estimated.
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={reset}>Retake</Button>
+                <Button className="flex-1" onClick={logItems} disabled={busy}>
+                  {busy ? "Logging…" : "Log these"}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </Sheet>
   );
 }
 

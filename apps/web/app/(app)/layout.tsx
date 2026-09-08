@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { BottomNav, Sidebar } from "@/components/nav";
+import { CommandPalette } from "@/components/palette";
 import { QuickLog } from "@/components/quick-log";
 import { PageLoading } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -63,6 +64,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       <QuickLog />
+      <CommandPalette />
       <BottomNav />
     </div>
   );

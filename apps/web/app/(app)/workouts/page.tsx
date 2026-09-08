@@ -1,13 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { Play, Plus, Search, Trash2, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { TopBar } from "@/components/nav";
-import { Button, Card, CardTitle, Empty, Field, Input, PageLoading, Sheet, useToast } from "@/components/ui";
+import { Button, Card, CardTitle, Empty, Field, Input, PageLoading, Segmented, Sheet, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
-import type { WorkoutSet } from "@/lib/types";
-import { fmtDate, fmtDuration, fmtNumber, todayISO } from "@/lib/utils";
+import type { WorkoutPlan, WorkoutSet } from "@/lib/types";
+import { fmtDate, fmtNumber, todayISO } from "@/lib/utils";
 
 interface DraftExercise {
   name: string;
@@ -16,6 +16,8 @@ interface DraftExercise {
 
 export default function WorkoutsPage() {
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<"history" | "plans">("history");
+  const [prefill, setPrefill] = useState<{ title: string; exercises: DraftExercise[] } | null>(null);
   const { data: workouts, isLoading } = useQuery({ queryKey: ["workouts"], queryFn: () => api.workouts(40) });
   const { data: range } = useQuery({ queryKey: ["range", 7], queryFn: () => api.rangeSummary(7) });
   const queryClient = useQueryClient();
@@ -29,8 +31,21 @@ export default function WorkoutsPage() {
 
   return (
     <>
-      <TopBar title="Workouts" right={<Button size="sm" onClick={() => setOpen(true)}><Plus size={15} /> Log workout</Button>} />
+      <TopBar
+        title="Workouts"
+        right={
+          <div className="flex items-center gap-2">
+            <Segmented options={[{ value: "history", label: "History" }, { value: "plans", label: "Plans" }]}
+                       value={tab} onChange={setTab} />
+            <Button size="sm" onClick={() => { setPrefill(null); setOpen(true); }}><Plus size={15} /> Log workout</Button>
+          </div>
+        }
+      />
       <main className="mx-auto max-w-5xl space-y-4 px-4 py-5 sm:px-6">
+        {tab === "plans" ? (
+          <PlansTab onStartDay={(title, exercises) => { setPrefill({ title, exercises }); setOpen(true); }} />
+        ) : (
+        <>
         <div className="grid grid-cols-2 gap-3">
           <Card className="p-4">
             <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">Sessions · 7d</div>
@@ -79,13 +94,182 @@ export default function WorkoutsPage() {
             </Card>
           ))
         )}
+        </>
+        )}
       </main>
-      <LogWorkoutSheet open={open} onClose={() => setOpen(false)} />
+      <LogWorkoutSheet open={open} onClose={() => setOpen(false)} prefill={prefill} />
     </>
   );
 }
 
-function LogWorkoutSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+// ---------- plans tab ----------
+
+function PlansTab({ onStartDay }: { onStartDay: (title: string, exercises: DraftExercise[]) => void }) {
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const [createOpen, setCreateOpen] = useState(false);
+  const { data: plans, isLoading } = useQuery({ queryKey: ["workout-plans"], queryFn: api.workoutPlans });
+  const del = useMutation({
+    mutationFn: api.deleteWorkoutPlan,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["workout-plans"] }),
+    onError: (e) => toast(e.message, "err"),
+  });
+
+  if (isLoading) return <PageLoading />;
+  return (
+    <div className="space-y-3">
+      {!plans?.length ? (
+        <Card>
+          <Empty title="No training plans"
+                 hint="A plan turns 'I should train' into a concrete set of days. Create one — or ask the assistant."
+                 action={<Button onClick={() => setCreateOpen(true)}><Plus size={15} /> Create plan</Button>} />
+        </Card>
+      ) : (
+        plans.map((p) => (
+          <Card key={p.id}>
+            <CardTitle
+              right={<button onClick={() => del.mutate(p.id)} aria-label="Delete plan" className="text-faint hover:text-bad"><Trash2 size={15} /></button>}
+            >
+              {p.name}
+            </CardTitle>
+            <div className="space-y-2">
+              {(p.days || []).map((d, i) => (
+                <div key={i} className="flex items-center gap-3 rounded-xl bg-surface-2/50 px-3.5 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold">{d.name || `Day ${i + 1}`}</div>
+                    <div className="truncate text-xs text-faint">
+                      {(d.exercises || []).map((e) => `${e.name} ${e.sets ?? ""}${e.reps ? `×${e.reps}` : ""}`.trim()).join(" · ")}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm" variant="outline"
+                    onClick={() =>
+                      onStartDay(
+                        d.name || p.name,
+                        (d.exercises || []).map((e) => ({
+                          name: e.name,
+                          sets: Array.from({ length: e.sets || 3 }, () => ({
+                            weight: e.weight != null ? String(e.weight) : "",
+                            reps: e.reps != null ? String(e.reps) : "",
+                          })),
+                        }))
+                      )
+                    }
+                  >
+                    <Play size={13} /> Start
+                  </Button>
+                </div>
+              ))}
+              {(!p.days || p.days.length === 0) && <p className="text-sm text-faint">No days defined.</p>}
+            </div>
+          </Card>
+        ))
+      )}
+      <Button variant="outline" className="w-full" onClick={() => setCreateOpen(true)}>
+        <Plus size={15} /> New plan
+      </Button>
+      <NewPlanSheet open={createOpen} onClose={() => setCreateOpen(false)} />
+    </div>
+  );
+}
+
+interface PlanDayExercise { name: string; sets: string; reps: string; weight: string }
+interface PlanDay { name: string; exercises: PlanDayExercise[] }
+
+function NewPlanSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [name, setName] = useState("");
+  const [days, setDays] = useState<PlanDay[]>([{ name: "Day 1", exercises: [{ name: "", sets: "3", reps: "10", weight: "" }] }]);
+  const queryClient = useQueryClient();
+  const toast = useToast();
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.createWorkoutPlan({
+        name,
+        days: days.map((d) => ({
+          name: d.name,
+          exercises: d.exercises
+            .filter((e) => e.name.trim())
+            .map((e) => ({
+              name: e.name.trim(),
+              ...(e.sets ? { sets: parseInt(e.sets) } : {}),
+              ...(e.reps ? { reps: parseInt(e.reps) } : {}),
+              ...(e.weight ? { weight: parseFloat(e.weight) } : {}),
+            })),
+        })).filter((d) => d.exercises.length > 0),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workout-plans"] });
+      toast("Plan created");
+      setName("");
+      setDays([{ name: "Day 1", exercises: [{ name: "", sets: "3", reps: "10", weight: "" }] }]);
+      onClose();
+    },
+    onError: (e) => toast(e.message, "err"),
+  });
+
+  const setDay = (di: number, next: PlanDay) => {
+    const copy = [...days];
+    copy[di] = next;
+    setDays(copy);
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title="New workout plan" wide>
+      <div className="space-y-4">
+        <Field label="Plan name">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Push / Pull / Legs" autoFocus />
+        </Field>
+        {days.map((d, di) => (
+          <div key={di} className="rounded-xl border border-line p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <Input className="h-9 font-medium" value={d.name}
+                     onChange={(e) => setDay(di, { ...d, name: e.target.value })} />
+              <button onClick={() => setDays(days.filter((_, i) => i !== di))} className="p-1.5 text-faint hover:text-bad" aria-label="Remove day">
+                <X size={15} />
+              </button>
+            </div>
+            <div className="space-y-1.5">
+              <div className="grid grid-cols-[1fr_52px_52px_64px_28px] gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
+                <span>Exercise</span><span>Sets</span><span>Reps</span><span>Weight</span><span />
+              </div>
+              {d.exercises.map((ex, ei) => (
+                <div key={ei} className="grid grid-cols-[1fr_52px_52px_64px_28px] items-center gap-1.5">
+                  <Input className="h-9" placeholder="Bench press" value={ex.name}
+                         onChange={(e) => { const exs = [...d.exercises]; exs[ei] = { ...ex, name: e.target.value }; setDay(di, { ...d, exercises: exs }); }} />
+                  <Input className="h-9 px-1 text-center" inputMode="numeric" value={ex.sets}
+                         onChange={(e) => { const exs = [...d.exercises]; exs[ei] = { ...ex, sets: e.target.value }; setDay(di, { ...d, exercises: exs }); }} />
+                  <Input className="h-9 px-1 text-center" inputMode="numeric" value={ex.reps}
+                         onChange={(e) => { const exs = [...d.exercises]; exs[ei] = { ...ex, reps: e.target.value }; setDay(di, { ...d, exercises: exs }); }} />
+                  <Input className="h-9 px-1 text-center" inputMode="decimal" placeholder="kg" value={ex.weight}
+                         onChange={(e) => { const exs = [...d.exercises]; exs[ei] = { ...ex, weight: e.target.value }; setDay(di, { ...d, exercises: exs }); }} />
+                  <button onClick={() => setDay(di, { ...d, exercises: d.exercises.filter((_, i) => i !== ei) })}
+                          className="p-1 text-faint hover:text-bad" aria-label="Remove exercise">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+              <button className="text-xs font-semibold text-accent"
+                      onClick={() => setDay(di, { ...d, exercises: [...d.exercises, { name: "", sets: "3", reps: "10", weight: "" }] })}>
+                + Exercise
+              </button>
+            </div>
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setDays([...days, { name: `Day ${days.length + 1}`, exercises: [{ name: "", sets: "3", reps: "10", weight: "" }] }])}>
+            + Day
+          </Button>
+          <Button className="flex-1" disabled={!name.trim() || save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? "Saving…" : "Create plan"}
+          </Button>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+function LogWorkoutSheet({ open, onClose, prefill }: { open: boolean; onClose: () => void; prefill?: { title: string; exercises: DraftExercise[] } | null }) {
   const [title, setTitle] = useState("");
   const [duration, setDuration] = useState("");
   const [exerciseQuery, setExerciseQuery] = useState("");
@@ -98,6 +282,17 @@ function LogWorkoutSheet({ open, onClose }: { open: boolean; onClose: () => void
     queryFn: () => api.exercises(exerciseQuery),
     enabled: open,
   });
+
+  // prefill from a plan day ("Start" button)
+  useEffect(() => {
+    if (open && prefill) {
+      setTitle(prefill.title);
+      setDraft(prefill.exercises.map((e) => ({ name: e.name, sets: e.sets.map((s) => ({ ...s })) })));
+    }
+    if (!open) {
+      setExerciseQuery("");
+    }
+  }, [open, prefill]);
 
   const save = useMutation({
     mutationFn: () =>

@@ -70,6 +70,25 @@ async def _resolve_item(db: AsyncSession, user: User, item: dict) -> dict:
         out["estimated"] = not exact
         if not exact:
             out["confidence"] = 0.6
+        # explicit user correction overrides the database lookup
+        if item.get("estimated") and item.get("calories") is not None:
+            for key in ("calories", "protein", "carbs", "fat", "fiber"):
+                if item.get(key) is not None:
+                    out[key] = float(item[key])
+            out["estimated"] = True
+            if item.get("confidence") is not None:
+                out["confidence"] = item["confidence"]
+    elif item.get("calories") is not None:
+        # explicit estimate (photo analysis, user knowledge) — keep uncertainty fields
+        for key in ("calories", "protein", "carbs", "fat", "fiber"):
+            out[key] = float(item.get(key) or 0)
+        out["estimated"] = True
+        if item.get("confidence") is not None:
+            out["confidence"] = item["confidence"]
+        if item.get("lower_kcal") is not None:
+            out["lower_kcal"] = item["lower_kcal"]
+        if item.get("upper_kcal") is not None:
+            out["upper_kcal"] = item["upper_kcal"]
     else:
         # Unknown food: explicit zero snapshot, flagged as unverified — never invent numbers.
         out.update({"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0, "fiber": 0.0,
