@@ -3,7 +3,8 @@ import type { NextConfig } from "next";
 const apiUrl = process.env.API_INTERNAL_URL || "http://localhost:8000";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // standalone output is for the Docker image; local `next start` uses the default server
+  ...(process.env.BUILD_STANDALONE === "true" ? { output: "standalone" as const } : {}),
   async rewrites() {
     return [{ source: "/api/v1/:path*", destination: `${apiUrl}/api/v1/:path*` }];
   },
