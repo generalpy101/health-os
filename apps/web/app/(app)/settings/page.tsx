@@ -303,6 +303,7 @@ function AISettingsCard() {
   const [model, setModel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [mode, setMode] = useState("hybrid");
   const [testResult, setTestResult] = useState<{ ok: boolean; latency_ms?: number; error?: string; reply?: string } | null>(null);
   const [testing, setTesting] = useState(false);
 
@@ -312,6 +313,7 @@ function AISettingsCard() {
       setModel(settings.model || "");
       setBaseUrl(settings.base_url || "");
     }
+    if (settings.mode) setMode(settings.mode);
   }, [settings, provider]);
 
   const preset = providers.find((p) => p.id === (provider || "mock"));
@@ -323,6 +325,7 @@ function AISettingsCard() {
         provider: provider || "mock",
         model: model || undefined,
         base_url: showUrl ? baseUrl || undefined : undefined,
+        mode,
         ...(apiKey ? { api_key: apiKey } : {}),
       }),
     onSuccess: () => {
@@ -355,6 +358,30 @@ function AISettingsCard() {
     <Card className="scroll-mt-20" id="ai">
       <CardTitle>AI provider</CardTitle>
       <div className="space-y-3">
+        <Field label="Privacy mode">
+          <div className="grid grid-cols-3 gap-1.5">
+            {([
+              { id: "local-only", label: "Local-only", desc: "Only offline/local models. Nothing leaves this machine." },
+              { id: "hybrid", label: "Hybrid", desc: "You choose per provider; local options preferred." },
+              { id: "hosted", label: "Hosted", desc: "Any provider allowed, incl. cloud APIs and CLIs." },
+            ] as const).map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setMode(m.id)}
+                className={cx(
+                  "rounded-xl border px-3 py-2.5 text-left transition-colors",
+                  mode === m.id ? "border-accent bg-accent-soft" : "border-line hover:bg-surface-2"
+                )}
+              >
+                <div className={cx("text-[13px] font-semibold", mode === m.id ? "text-accent" : "text-ink")}>
+                  {m.label}
+                </div>
+                <div className="mt-0.5 text-[11px] leading-snug text-faint">{m.desc}</div>
+              </button>
+            ))}
+          </div>
+        </Field>
         <Field label="Provider" hint="Local options keep your health data on this machine.">
           <Select
             value={provider || "mock"}
@@ -375,6 +402,13 @@ function AISettingsCard() {
         </Field>
         {preset?.hint && (
           <p className="-mt-1 text-xs leading-relaxed text-faint">{preset.hint}</p>
+        )}
+        {mode === "local-only" && preset && preset.kind !== "mock" &&
+          !/localhost|127\.0\.0\.1|host\.docker\.internal/.test(baseUrl || preset.default_base_url || "") && (
+          <p className="-mt-1 rounded-lg bg-gold-soft px-3 py-2 text-xs font-medium text-gold">
+            Local-only mode is on — this provider won't run until you switch mode or pick a local endpoint.
+            (Agent CLIs call their own cloud backends, so they count as hosted.)
+          </p>
         )}
         {preset && preset.kind !== "mock" && (
           <Field label={preset.kind === "cli" ? "Model (optional — CLI default if empty)" : "Model"}>

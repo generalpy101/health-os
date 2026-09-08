@@ -272,7 +272,7 @@ export const api = {
   commitOnboarding: (b: unknown) => post("/ai/onboarding/commit", b),
   aiProviders: () => request<{ providers: import("./types").AIProviderInfo[] }>("/ai/providers"),
   aiSettings: () => request<{ ai: import("./types").AISettings }>("/ai/settings"),
-  updateAiSettings: (b: { provider?: string; model?: string; base_url?: string; api_key?: string }) =>
+  updateAiSettings: (b: { provider?: string; model?: string; base_url?: string; api_key?: string; mode?: string }) =>
     put<{ ai: import("./types").AISettings }>("/ai/settings", b),
   testAiProvider: (b: { provider?: string; model?: string; base_url?: string; api_key?: string }) =>
     post<{ ok: boolean; latency_ms?: number; reply?: string; error?: string }>("/ai/test", b),

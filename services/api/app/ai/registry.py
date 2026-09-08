@@ -71,6 +71,19 @@ PRESETS: list[Preset] = [
 
 PRESET_BY_ID = {p.id: p for p in PRESETS}
 
+# AI privacy modes (spec §92)
+AI_MODES = ("local-only", "hybrid", "hosted")
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
+
+
+def _is_local_url(url: str) -> bool:
+    from urllib.parse import urlparse
+    try:
+        host = urlparse(url).hostname or ""
+    except Exception:
+        return False
+    return host in LOCAL_HOSTS or host.endswith((".local", ".internal"))
+
 _detect_cache: dict[str, tuple[float, bool]] = {}
 _DETECT_TTL = 30.0
 
@@ -121,7 +134,23 @@ def mask_ai_pref(ai: dict) -> dict:
 
 def resolve_provider_from_pref(ai: dict) -> AIProvider:
     settings = get_settings()
+    mode = ai.get("mode", "hybrid")
     preset = PRESET_BY_ID.get(ai.get("provider") or "")
+
+    if mode == "local-only":
+        # enforce: only the offline provider or local HTTP endpoints ever run.
+        # CLIs are excluded — Claude Code/Codex/opencode call their own hosted
+        # backends under the hood, so they are not local-only safe.
+        if preset and preset.kind == "openai_compatible":
+            base_url = ai.get("base_url") or preset.default_base_url
+            if base_url and _is_local_url(base_url):
+                return OpenAICompatibleProvider(
+                    base_url=base_url,
+                    api_key=ai.get("api_key") or "",
+                    model=ai.get("model") or preset.default_model or settings.ai_model,
+                )
+        return MockProvider()
+
     if preset is None or preset.id == "mock":
         # env-level override still wins over an unset user pref
         if not ai.get("provider") and settings.ai_provider == "openai_compatible":

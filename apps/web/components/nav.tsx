@@ -56,7 +56,7 @@ export function Sidebar() {
         })}
       </nav>
       <div className="space-y-3 p-4">
-        <ProviderPicker />
+        <ProviderPicker direction="up" />
         <div className="text-[11px] leading-relaxed text-faint">
           Not a medical device.
           <br />

@@ -278,6 +278,7 @@ export interface AISettings {
   model?: string;
   base_url?: string;
   has_api_key?: boolean;
+  mode?: "local-only" | "hybrid" | "hosted";
 }
 
 export interface OnboardingProposal {

@@ -23,7 +23,7 @@ export function providerLabel(providers: AIProviderInfo[], id?: string): string 
 }
 
 /** Compact provider switcher — assistant header, sidebar, onboarding. */
-export function ProviderPicker({ compact = false }: { compact?: boolean }) {
+export function ProviderPicker({ direction = "down" }: { direction?: "down" | "up" }) {
   const providers = useAiProviders();
   const settings = useAiSettings();
   const queryClient = useQueryClient();
@@ -62,36 +62,45 @@ export function ProviderPicker({ compact = false }: { compact?: boolean }) {
           !currentDetected && "border-gold/50 text-gold"
         )}
         aria-label="AI provider"
-        title={current?.hint}
       >
         <Cpu size={13} />
         <span className="max-w-28 truncate">{current?.label || "Offline"}</span>
         <ChevronDown size={12} className={cx("transition-transform", open && "rotate-180")} />
       </button>
       {open && (
-        <div className="absolute right-0 top-9 z-50 w-72 rounded-2xl border border-line bg-surface p-1.5 shadow-xl">
+        <div className={cx(
+          "absolute z-50 max-h-[70dvh] w-72 overflow-y-auto rounded-2xl border border-line bg-surface p-1.5 shadow-xl",
+          direction === "up" ? "bottom-9 left-0" : "right-0 top-9"
+        )}>
           <div className="px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
             AI provider
           </div>
           {providers.map((p) => {
             const active = (settings.provider || "mock") === p.id;
+            const localOnly = (settings as { mode?: string }).mode === "local-only";
+            const isLocal = p.kind === "mock" ||
+              (p.kind === "openai_compatible" &&
+                /^(https?:\/\/)?(localhost|127\.0\.0\.1|host\.docker\.internal|\[::1\])/.test(p.default_base_url));
+            const blocked = localOnly && !isLocal;
             return (
               <button
                 key={p.id}
+                disabled={blocked}
                 onClick={() => { save.mutate(p.id); setOpen(false); }}
                 className={cx(
                   "flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-surface-2",
-                  active && "bg-surface-2"
+                  active && "bg-surface-2",
+                  blocked && "opacity-45"
                 )}
               >
                 <span className={cx(
                   "mt-1.5 h-2 w-2 shrink-0 rounded-full",
-                  p.detected ? "bg-good" : "bg-faint"
+                  blocked ? "bg-bad" : p.detected ? "bg-good" : "bg-faint"
                 )} />
                 <span className="min-w-0 flex-1">
                   <span className="block text-[13px] font-semibold">{p.label}</span>
                   <span className="block truncate text-[11px] text-faint">
-                    {p.detected ? p.hint : `Not detected — ${p.hint}`}
+                    {blocked ? "Blocked by local-only mode" : p.detected ? p.hint : `Not detected — ${p.hint}`}
                   </span>
                 </span>
                 {active && <Check size={14} className="mt-1 shrink-0 text-accent" />}

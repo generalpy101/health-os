@@ -47,11 +47,15 @@ class AISettingsIn(BaseModel):
     model: str | None = None
     base_url: str | None = None
     api_key: str | None = None
+    mode: str | None = None
 
 
 @router.put("/settings")
 async def put_ai_settings(data: AISettingsIn, user: User = Depends(current_user),
                           db: AsyncSession = Depends(get_db)):
+    from ..ai.registry import AI_MODES
+    if data.mode is not None and data.mode not in AI_MODES:
+        raise HTTPException(422, f"mode must be one of {AI_MODES}")
     ai = {k: v for k, v in data.model_dump().items() if v is not None}
     return {"ai": await save_ai_pref(db, user, ai)}
 
