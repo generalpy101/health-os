@@ -135,9 +135,12 @@ def _mock_tool_calls(message: str) -> tuple[list[ToolCall], str]:
         return calls, "schedule"
     if re.search(r"\bevery\b", text) and any(d in text for d in DAY_WORDS):
         days = [v for k, v in DAY_WORDS.items() if k in text]
-        title = re.sub(r"\b(every|schedule|add|on|at)\b", "", text).strip()
+        title = re.sub(r"\b(every|schedule|add|on|at|and)\b", " ", text)
         for day_word in DAY_WORDS:
-            title = title.replace(day_word, "").strip()
+            title = re.sub(rf"\b{day_word}\b", " ", title)
+        title = re.sub(r"\d{1,2}(?::\d{2})?\s*(am|pm)?\b", " ", title)  # strip time
+        title = re.sub(r"[,]+", " ", title)
+        title = re.sub(r"\s{2,}", " ", title).strip()
         hm = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", text)
         hour = 18
         if hm:
