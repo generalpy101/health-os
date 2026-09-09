@@ -117,10 +117,11 @@ async def _resolve_item(db: AsyncSession, user: User, item: dict) -> dict:
         if not matches and singular != name_l:
             matches = await search_foods(db, user, singular, limit=8)
         if not matches:
-            # word-reduction: "chicken cutlets" → "chicken"; "greek yogurt bowl" → "greek yogurt" → "greek"
+            # word-reduction: "chicken cutlets" → "chicken"; "rolled oats" → "oats"
             words = [w for w in re.split(r"\s+", name_l) if len(w) > 2]
-            for n in range(len(words) - 1, 0, -1):
-                sub = " ".join(words[:n])
+            subs = [" ".join(words[:n]) for n in range(len(words) - 1, 0, -1)] + \
+                   [" ".join(words[n:]) for n in range(1, len(words))]
+            for sub in subs:
                 matches = await search_foods(db, user, sub, limit=8)
                 if matches:
                     break

@@ -272,6 +272,20 @@ async def h_create_recipe(db, user, args):
                         "nutrition_per_serving": (r.nutrition or {}).get("per_serving", {})}}
 
 
+async def h_update_recipe(db, user, args):
+    from ..schemas import RecipeIn
+    from ..services import recipes as recipes_service
+    r = await recipes_service.update_recipe(db, user, args.pop("recipe_id"), RecipeIn(**args))
+    return {"updated": {"id": str(r.id), "name": r.name,
+                        "nutrition_per_serving": (r.nutrition or {}).get("per_serving", {})}}
+
+
+async def h_delete_recipe(db, user, args):
+    from ..services import recipes as recipes_service
+    await recipes_service.delete_recipe(db, user, args["recipe_id"])
+    return {"deleted": True}
+
+
 async def h_get_user_memories(db, user, args):
     result = await db.execute(
         select(UserMemory).where(UserMemory.user_id == user.id, UserMemory.status == "active")
@@ -357,6 +371,13 @@ REGISTRY: dict[str, tuple[dict, Handler, str]] = {
         "ingredients": {"type": "array", "items": {"type": "object", "properties": {
             "food_id": S, "name": S, "quantity": N, "unit": S}, "required": ["name", "quantity"]}}},
         ["name", "ingredients"]), h_create_recipe, LOW),
+    "update_recipe": (_schema("update_recipe", "Update a recipe in place (never create a duplicate to 'fix' one)", {
+        "recipe_id": S, "name": S, "description": S, "servings": N, "prep_minutes": N, "cook_minutes": N,
+        "cuisine": S, "tags": {"type": "array", "items": S}, "steps": {"type": "array", "items": S},
+        "ingredients": {"type": "array", "items": {"type": "object", "properties": {
+            "food_id": S, "name": S, "quantity": N, "unit": S}, "required": ["name", "quantity"]}}},
+        ["recipe_id", "name", "ingredients"]), h_update_recipe, MEDIUM),
+    "delete_recipe": (_schema("delete_recipe", "Delete a recipe", {"recipe_id": S}, ["recipe_id"]), h_delete_recipe, HIGH),
 }
 
 
