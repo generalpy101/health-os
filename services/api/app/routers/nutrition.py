@@ -67,7 +67,13 @@ async def delete_food_log(log_id: UUID, user: User = Depends(current_user), db: 
 @router.get("/nutrition/daily", response_model=NutritionDayOut)
 async def daily_nutrition(day: str | None = None, user: User = Depends(current_user),
                           db: AsyncSession = Depends(get_db)):
-    d = parse_date(day, user.timezone)
+    # no day passed → the user's current logical day (boundary-aware)
+    if day is None:
+        from ..services.common import day_start_minutes
+        from ..utils.time import logical_today
+        d = logical_today(user.timezone, await day_start_minutes(db, user))
+    else:
+        d = parse_date(day, user.timezone)
     totals = await nutrition_service.daily_totals(db, user, d)
     logs = await nutrition_service.list_food_logs(db, user, day=d)
     targets = await goals_service.targets_map(db, user)

@@ -23,7 +23,12 @@ async def log_water(data: WaterIn, user: User = Depends(current_user), db: Async
 
 @router.get("/water")
 async def get_water(day: str | None = None, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
-    d = parse_date(day, user.timezone)
+    if day is None:
+        from ..services.common import day_start_minutes
+        from ..utils.time import logical_today
+        d = logical_today(user.timezone, await day_start_minutes(db, user))
+    else:
+        d = parse_date(day, user.timezone)
     logs = await health_service.list_water(db, user, d)
     total = await health_service.water_total(db, user, d)
     return {"date": d, "total_ml": total, "logs": logs}

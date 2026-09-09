@@ -15,15 +15,21 @@ import { MEAL_TYPES, cx, fmtNumber, todayISO } from "@/lib/utils";
 import { ImportSheet } from "./import-sheet";
 
 export default function NutritionPage() {
-  const [day, setDay] = useState(todayISO());
+  // null = ask the server for the current logical day (respects "my day starts at")
+  const [day, setDay] = useState<string | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [editItem, setEditItem] = useState<{ log: FoodLog; index: number } | null>(null);
   const [foodOpen, setFoodOpen] = useState(false);
   const { data, isLoading } = useQuery({
-    queryKey: ["nutrition", day],
-    queryFn: () => api.dailyNutrition(day),
+    queryKey: ["nutrition", day || "now"],
+    queryFn: () => api.dailyNutrition(day || undefined),
   });
+
+  // adopt the server's logical day once it answers
+  useEffect(() => {
+    if (day === null && data?.date) setDay(data.date);
+  }, [day, data]);
   const queryClient = useQueryClient();
   const toast = useToast();
 
@@ -41,7 +47,7 @@ export default function NutritionPage() {
         title="Nutrition"
         right={
           <div className="flex items-center gap-1.5 sm:gap-2">
-            <Input type="date" value={day} onChange={(e) => setDay(e.target.value)}
+            <Input type="date" value={day ?? ""} onChange={(e) => setDay(e.target.value)}
                    className="h-9 w-[7.6rem] px-2 text-xs sm:w-auto sm:px-3.5 sm:text-sm" />
             <Button size="sm" variant="outline" onClick={() => setFoodOpen(true)} aria-label="Add food from label">
               <Plus size={15} /><span className="hidden sm:inline">Food</span>
@@ -138,7 +144,7 @@ export default function NutritionPage() {
           </>
         )}
       </main>
-      <LogFoodSheet open={logOpen} onClose={() => setLogOpen(false)} day={day} />
+      <LogFoodSheet open={logOpen} onClose={() => setLogOpen(false)} day={day || todayISO()} />
       <EditItemSheet target={editItem} onClose={() => setEditItem(null)} />
       <AddFoodSheet open={foodOpen} onClose={() => setFoodOpen(false)} />
       <ImportSheet open={importOpen} onClose={() => setImportOpen(false)} />

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChefHat, Plus, ShoppingBasket, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TopBar } from "@/components/nav";
 import { DayTimeline, type Block } from "@/components/day-timeline";
 import { Button, Card, Empty, Field, Input, PageLoading, Segmented, Select, Sheet, useToast } from "@/components/ui";
@@ -17,6 +17,19 @@ export default function MealsPage() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [view, setView] = useState<"board" | "timeline">("board");
   const [tlDay, setTlDay] = useState(todayISO());
+  const navigatedRef = useRef(false);
+  const { data: prefs } = useQuery({ queryKey: ["preferences"], queryFn: api.preferences });
+
+  // default the timeline to the current LOGICAL day: before the boundary,
+  // "today" is still the window that started yesterday
+  useEffect(() => {
+    const boundary = (prefs?.data?.day_start_minutes as number | undefined) || 0;
+    if (!boundary || navigatedRef.current) return;
+    const now = new Date();
+    if (now.getHours() * 60 + now.getMinutes() < boundary) {
+      setTlDay(toISODate(addDays(new Date(), -1)));
+    }
+  }, [prefs]);
   const [slot, setSlot] = useState<{ date: string; meal: string; time?: string } | null>(null);
   const [block, setBlock] = useState<Block | null>(null);
   const [groceryOpen, setGroceryOpen] = useState(false);
@@ -93,16 +106,16 @@ export default function MealsPage() {
         {view === "timeline" ? (
           <>
             <div className="mb-4 flex items-center justify-between">
-              <Button variant="ghost" size="sm" onClick={() => setTlDay(toISODate(addDays(new Date(tlDay), -1)))}>← Prev</Button>
+              <Button variant="ghost" size="sm" onClick={() => { navigatedRef.current = true; setTlDay(toISODate(addDays(new Date(tlDay), -1))); }}>← Prev</Button>
               <div className="text-center">
                 <div className="font-display text-lg font-semibold">
                   {new Date(tlDay + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
                 </div>
                 {tlDay !== todayISO() && (
-                  <button className="text-xs font-medium text-accent" onClick={() => setTlDay(todayISO())}>Today</button>
+                  <button className="text-xs font-medium text-accent" onClick={() => { navigatedRef.current = true; setTlDay(todayISO()); }}>Today</button>
                 )}
               </div>
-              <Button variant="ghost" size="sm" onClick={() => setTlDay(toISODate(addDays(new Date(tlDay), 1)))}>Next →</Button>
+              <Button variant="ghost" size="sm" onClick={() => { navigatedRef.current = true; setTlDay(toISODate(addDays(new Date(tlDay), 1))); }}>Next →</Button>
             </div>
             <DayTimeline
               day={tlDay}
