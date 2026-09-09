@@ -98,6 +98,18 @@ async def update_target(db: AsyncSession, user: User, target_id: UUID, patch: Ta
                          reason or "target update", actor)
     for key, value in changes.items():
         setattr(target, key, value)
+    if target.active:
+        # one active target per key+period — reactivating this one retires the rest
+        # (versioned, so the superseded target's state stays revertible)
+        siblings = await db.execute(
+            select(Target).where(Target.user_id == user.id, Target.key == target.key,
+                                 Target.period == target.period, Target.active.is_(True),
+                                 Target.id != target.id)
+        )
+        for sib in siblings.scalars().all():
+            await record_version(db, user.id, "target", sib.id, row_snapshot(sib),
+                                 f"superseded by {target.key} target update", actor)
+            sib.active = False
     await audit(db, user.id, "target_changed", "target", target.id, changes)
     await db.commit()
     await db.refresh(target)
