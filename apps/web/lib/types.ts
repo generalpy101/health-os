@@ -51,6 +51,7 @@ export interface Food {
   fat: number;
   fiber: number;
   source: string;
+  barcode?: string | null; // TRACK A
 }
 
 export interface FoodLogItem {
@@ -290,6 +291,7 @@ export interface OnboardingProposal {
   defaults_suggested?: { calories: number; protein_g: number; water_ml: number };
 }
 
+<<<<<<< HEAD
 // === TRACK C ===
 
 export interface PlanVersion {
@@ -316,4 +318,25 @@ export interface SearchResults {
 export interface SemanticSearchResponse {
   results: { entity_type: string; entity_id: string; snippet: string; score: number }[];
   message?: string;
+=======
+// === TRACK A ===
+
+export type ImportKind = "measurements" | "food_logs" | "workouts";
+
+export interface ImportRowError {
+  row: number;
+  message: string;
+}
+
+export interface ImportPreview {
+  rows: Record<string, unknown>[];
+  errors: ImportRowError[];
+  total: number;
+  valid: number;
+}
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+>>>>>>> track-a-food-data
 }

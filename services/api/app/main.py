@@ -7,7 +7,7 @@ from .config import get_settings
 from .db import SessionLocal, engine
 from .migrate import run_migrations
 from .ratelimit import RateLimitMiddleware
-from .routers import (ai, analytics, auth, fitness, goals, health, notifications, nutrition,
+from .routers import (ai, analytics, auth, fitness, goals, health, imports, notifications, nutrition,
                       photos, recipes, schedule, users)
 from .routers import platform  # TRACK C
 from .seed import seed
@@ -48,6 +48,8 @@ app.include_router(ai.router, prefix=API)
 app.include_router(photos.router, prefix=API)
 app.include_router(notifications.router, prefix=API)
 app.include_router(platform.router, prefix=API)  # TRACK C
+# TRACK A
+app.include_router(imports.router, prefix=API)
 
 app.add_middleware(RateLimitMiddleware)
 

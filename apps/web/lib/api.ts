@@ -1,7 +1,7 @@
 import type {
   ChatAction, Conversation, DailySummary, Food, FoodLog, Goal, Habit, HabitProgress,
-  Measurement, NutritionDay, OnboardingProposal, Profile, RangeSummary, Recipe, ScheduleEvent,
-  SleepLog, Target, User, WeightTrend, Workout,
+  ImportKind, ImportPreview, ImportResult, Measurement, NutritionDay, OnboardingProposal, Profile,
+  RangeSummary, Recipe, ScheduleEvent, SleepLog, Target, User, WeightTrend, Workout,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -280,6 +280,7 @@ export const api = {
     request<{ models: string[]; detected: boolean; source: string; default?: string }>(
       `/ai/providers/${providerId}/models${qs({ base_url: baseUrl })}`),
 
+<<<<<<< HEAD
   // === TRACK C ===
   planVersions: (entityType: string, entityId: string) =>
     request<import("./types").PlanVersion[]>(`/versions/${entityType}/${entityId}`),
@@ -292,4 +293,14 @@ export const api = {
   searchAll: (q: string) => request<import("./types").SearchResults>(`/search${qs({ q })}`),
   semanticSearch: (q: string) =>
     request<import("./types").SemanticSearchResponse>(`/search/semantic${qs({ q })}`),
+=======
+  // === TRACK A ===
+  searchFoodsProvider: (q: string, limit = 20, provider: "local" | "remote" | "auto" = "auto") =>
+    request<Food[]>(`/foods/search${qs({ q, limit, provider })}`),
+  foodByBarcode: (code: string) => request<Food>(`/foods/barcode/${encodeURIComponent(code)}`),
+  importPreview: (b: { kind: ImportKind; format: "csv" | "json"; text: string }) =>
+    post<ImportPreview>("/import/preview", b),
+  importCommit: (b: { kind: ImportKind; rows: Record<string, unknown>[] }) =>
+    post<ImportResult>("/import/commit", b),
+>>>>>>> track-a-food-data
 };
