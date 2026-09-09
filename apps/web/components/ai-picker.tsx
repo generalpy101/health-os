@@ -8,6 +8,45 @@ import { api } from "@/lib/api";
 import type { AIProviderInfo } from "@/lib/types";
 import { cx } from "@/lib/utils";
 
+/** Inline model selector used inside the provider picker dropdown. */
+function ModelRow({ providerId, kind }: { providerId: string; kind: string }) {
+  const queryClient = useQueryClient();
+  const settings = useAiSettings();
+  const { data } = useQuery({
+    queryKey: ["ai-models", providerId, settings.base_url],
+    queryFn: () => api.aiModels(providerId, settings.base_url || undefined),
+    staleTime: 60_000,
+  });
+  const save = useMutation({
+    mutationFn: (model: string) => api.updateAiSettings({ model }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["ai-settings"] }),
+  });
+  const models = data?.models || [];
+  const current = settings.model || "";
+
+  if (!data?.detected && models.length === 0) {
+    return (
+      <p className="text-[11px] leading-snug text-faint">
+        No live model list — set one in Settings → AI.
+      </p>
+    );
+  }
+  return (
+    <select
+      value={current}
+      onChange={(e) => save.mutate(e.target.value)}
+      className="h-9 w-full rounded-lg border border-line bg-surface px-2 font-mono text-[12px] text-ink focus:border-accent focus:outline-none"
+      aria-label="Model"
+    >
+      <option value="">{kind === "cli" ? "CLI default" : `Default${data?.default ? ` (${data.default})` : ""}`}</option>
+      {models.map((m) => (
+        <option key={m} value={m}>{m}</option>
+      ))}
+      {current && !models.includes(current) && <option value={current}>{current}</option>}
+    </select>
+  );
+}
+
 export function useAiProviders() {
   const { data } = useQuery({ queryKey: ["ai-providers"], queryFn: api.aiProviders, staleTime: 60_000 });
   return data?.providers || [];
@@ -107,6 +146,14 @@ export function ProviderPicker({ direction = "down" }: { direction?: "down" | "u
               </button>
             );
           })}
+          {current && current.kind !== "mock" && (
+            <div className="mt-1 border-t border-line px-2.5 py-2">
+              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                Model{current.label ? ` — ${current.label}` : ""}
+              </div>
+              <ModelRow providerId={current.id} kind={current.kind} />
+            </div>
+          )}
           <Link
             href="/settings#ai"
             onClick={() => setOpen(false)}

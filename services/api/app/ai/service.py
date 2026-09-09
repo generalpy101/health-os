@@ -220,13 +220,25 @@ NUMBER_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "fiv
                 "six": 6, "seven": 7, "twice": 2, "thrice": 3}
 
 
-ONBOARDING_PROMPT = """Extract a health/fitness setup from this user description. Return ONLY minified JSON with this shape:
-{"goals": [{"type": "weight_loss|weight_gain|maintenance|muscle_gain|strength|endurance|fitness|sleep|hydration|habit|nutrition|activity|sport|custom", "title": str, "start_value": number?, "target_value": number?, "unit": str?}],
- "targets": [{"key": "calories|protein|water|steps|sleep_minutes|workouts|swimming", "value": number, "unit": str, "period": "daily|weekly"}],
+ONBOARDING_PROMPT = """You are setting up a personal health OS for a new user. Read their description and return ONLY minified JSON with this shape:
+{"profile": {"age": number?, "height_cm": number?, "weight_kg": number?, "sex": "male|female"?, "activity_level": "sedentary|light|moderate|active|very_active"?},
+ "goals": [{"type": "weight_loss|weight_gain|maintenance|muscle_gain|strength|endurance|fitness|sleep|hydration|habit|nutrition|activity|sport|custom", "title": str, "start_value": number?, "target_value": number?, "unit": str?}],
+ "targets": [{"key": "workouts|swimming|steps|sleep_minutes", "value": number, "unit": str, "period": "daily|weekly"}],
  "events": [{"type": "workout|swimming|work|sleep|meal|custom", "title": str, "bydays": [0-6, Monday=0], "hour": 0-23, "end_hour": 0-23?}],
+ "workout_plan": {"name": str, "days": [{"name": str, "exercises": [{"name": str, "sets": number, "reps": number}]}]}?,
  "memories": [{"type": "fact|preference", "key": snake_case, "value": str}],
  "dietary": {"diet": str?, "dislikes": [str]}}
-Only include what the text supports. Do not invent numbers.
+
+Rules:
+- Only include what the text supports. NEVER invent body stats or calorie numbers — calorie/protein
+  targets are computed deterministically by the system from the profile you extract, so omit "calories"
+  and "protein" targets entirely.
+- Map current body weight to BOTH profile.weight_kg and the weight goal's start_value.
+- If they state a training frequency (e.g. "train 4 times a week"), include a workout_plan: a sensible
+  split for that frequency (2-3 days → full body; 4 → upper/lower; 5-6 → push/pull/legs variants) using
+  basic compound exercises (squat, bench/press, row, overhead press, plank), 3 sets of 8-12 each.
+- Schedule events should reflect their stated schedule: workouts on spread weekdays at their preferred
+  time (default 18:00), work block weekdays if hours are given.
 
 USER TEXT:
 %s"""
@@ -244,15 +256,27 @@ async def _parse_onboarding_llm(provider: AIProvider, text: str) -> dict | None:
         if not isinstance(data, dict) or "goals" not in data:
             return None
         dietary = data.get("dietary") or {}
-        return {
-            "profile": {"dietary": dietary, "activity_level": "moderate", "onboarding_completed": True},
+        p = data.get("profile") or {}
+        birth_year = None
+        if isinstance(p.get("age"), (int, float)) and p["age"] > 0:
+            birth_year = user_now(user.timezone).year - int(p["age"])
+        return _enrich_proposal({
+            "profile": {
+                "dietary": dietary,
+                "activity_level": p.get("activity_level") or "moderate",
+                "height_cm": p.get("height_cm"),
+                "birth_year": birth_year,
+                "sex": p.get("sex"),
+                "onboarding_completed": True,
+            },
+            "weight_kg": p.get("weight_kg"),
             "goals": [g for g in data.get("goals", []) if isinstance(g, dict) and g.get("title")],
             "targets": [t for t in data.get("targets", []) if isinstance(t, dict) and t.get("key") and t.get("value")],
             "events": [e for e in data.get("events", []) if isinstance(e, dict) and e.get("title")],
+            "workout_plan": data.get("workout_plan") if isinstance(data.get("workout_plan"), dict) else None,
             "habits": [],
             "memories": [m for m in data.get("memories", []) if isinstance(m, dict) and m.get("key")],
-            "defaults_suggested": {"calories": 2000, "protein_g": 120, "water_ml": 2500},
-        }
+        })
     except Exception:
         return None
 
@@ -266,6 +290,77 @@ async def parse_onboarding(db: AsyncSession, user: User, text: str) -> dict:
     return _parse_onboarding_keywords(text)
 
 
+def _enrich_proposal(proposal: dict) -> dict:
+    """Deterministic layer on top of any parser: compute suggested nutrition targets
+    from body stats (Mifflin-St Jeor), propose a starter training plan from the
+    detected weekly frequency. Never fabricates stats — only uses given numbers."""
+    from ..utils import metrics as m
+
+    profile = proposal.get("profile") or {}
+    weight = proposal.get("weight_kg")
+    if not isinstance(weight, (int, float)):
+        weight = None
+    height = profile.get("height_cm")
+    age = None
+    if profile.get("birth_year"):
+        from ..utils.time import user_today
+        age = user_today("UTC").year - int(profile["birth_year"])
+
+    primary = (proposal.get("goals") or [{}])[0].get("type", "maintenance")
+    suggested: list[dict] = []
+    have = {t.get("key") for t in proposal.get("targets") or []}
+
+    if weight and height and age:
+        bmr = m.bmr_mifflin(weight, height, age, profile.get("sex"))
+        tdee = m.tdee(bmr, profile.get("activity_level"))
+        if tdee:
+            if primary in ("weight_loss",):
+                cal = max(1200, tdee - 500)
+                reason = f"TDEE ≈{tdee} kcal (BMR {bmr} × activity) minus 500 kcal deficit"
+            elif primary in ("weight_gain", "muscle_gain"):
+                cal = tdee + 300
+                reason = f"TDEE ≈{tdee} kcal plus 300 kcal surplus"
+            else:
+                cal = tdee
+                reason = f"TDEE ≈{tdee} kcal (BMR {bmr} × activity)"
+            if "calories" not in have:
+                suggested.append({"key": "calories", "value": cal, "unit": "kcal", "period": "daily",
+                                  "mode": "minimum", "source": "calculated", "reason": reason})
+        protein = round(weight * (2.0 if primary in ("weight_loss", "muscle_gain") else 1.6))
+        if "protein" not in have:
+            suggested.append({"key": "protein", "value": protein, "unit": "g", "period": "daily",
+                              "mode": "minimum", "source": "calculated",
+                              "reason": f"{protein / weight:.1f} g/kg × {weight} kg body weight"})
+    if "water" not in have:
+        suggested.append({"key": "water", "value": 2500, "unit": "ml", "period": "daily", "mode": "minimum",
+                          "source": "calculated", "reason": "sensible default; adjust to thirst and climate"})
+
+    proposal["suggested_targets"] = suggested
+
+    # starter training plan from detected weekly frequency — only when the parser didn't supply one
+    llm_plan = proposal.get("workout_plan")
+    if llm_plan and not (isinstance(llm_plan.get("days"), list) and llm_plan["days"]):
+        proposal["workout_plan"] = None
+        llm_plan = None
+    freq = next((int(t["value"]) for t in (proposal.get("targets") or []) if t.get("key") == "workouts"), None)
+    if freq and freq > 0 and not llm_plan:
+        templates = {
+            2: ["Full body A", "Full body B"],
+            3: ["Full body A", "Full body B", "Full body C"],
+            4: ["Upper A", "Lower A", "Upper B", "Lower B"],
+            5: ["Push", "Pull", "Legs", "Upper", "Lower"],
+            6: ["Push", "Pull", "Legs", "Push", "Pull", "Legs"],
+        }
+        day_names = templates.get(freq) or [f"Session {i + 1}" for i in range(freq)]
+        base_exercises = ["Barbell Back Squat", "Barbell Bench Press", "Barbell Row", "Overhead Press", "Plank"]
+        proposal["workout_plan"] = {
+            "name": f"{freq}x/week starter",
+            "days": [{"name": n, "exercises": [{"name": e, "sets": 3, "reps": 10} for e in base_exercises]}
+                     for n in day_names],
+        }
+    return proposal
+
+
 def _parse_onboarding_keywords(text: str) -> dict:
     """Keyword-based extraction (works offline). A hosted provider refines it later."""
     t = text.lower()
@@ -275,6 +370,26 @@ def _parse_onboarding_keywords(text: str) -> dict:
     habits_out: list[dict] = []
     memories: list[dict] = []
     dietary: dict = {}
+
+    # body stats: "25 yo", "173 cm", "82 kg", "male/female"
+    age = None
+    m_age = re.search(r"(\d{2})\s*(?:\s*yo\b|years?\s*old|y/?o\b)", t)
+    if m_age:
+        age = int(m_age.group(1))
+    height_cm = None
+    m_h = re.search(r"(\d{3}(?:\.\d+)?)\s*cm", t)
+    if m_h:
+        height_cm = float(m_h.group(1))
+    weight_kg = None
+    m_w = re.search(r"(?:^|\s)(\d{2,3}(?:\.\d+)?)\s*kg\b", t)
+    if m_w and not re.search(r"from\s+" + re.escape(m_w.group(1)) + r"\s*kg\s*(?:to|->)", t):
+        # a bare "82kg" that isn't part of a "from X to Y" range = current weight
+        weight_kg = float(m_w.group(1))
+    sex = None
+    if re.search(r"\b(female|woman)\b", t):
+        sex = "female"
+    elif re.search(r"\b(male|man)\b", t):
+        sex = "male"
 
     if re.search(r"lose (fat|weight)|fat loss|cut\b|lose\b", t):
         goals_out.append({"type": "weight_loss", "title": "Lose fat", "priority": "primary"})
@@ -293,9 +408,10 @@ def _parse_onboarding_keywords(text: str) -> dict:
     if not goals_out:
         goals_out.append({"type": "custom", "title": text[:80].strip().capitalize()})
 
-    m = re.search(r"(\d+(?:\.\d+)?)\s*kg\s*(?:to|->|down to)\s*(\d+(?:\.\d+)?)", t)
+    m = re.search(r"from\s+(\d+(?:\.\d+)?)\s*(?:kg)?\s*(?:to|->|down to)\s*(\d+(?:\.\d+)?)\s*kg", t)
     if m and goals_out:
         goals_out[0].update({"start_value": float(m.group(1)), "target_value": float(m.group(2)), "unit": "kg"})
+        weight_kg = float(m.group(1))  # "from 82 to 74" → current weight is 82
 
     # training frequency
     m = re.search(r"train(?:ing)?\s+(\w+)\s*(?:times?|days?)\s+a\s+week", t)
@@ -341,12 +457,19 @@ def _parse_onboarding_keywords(text: str) -> dict:
     if "sleep" in t:
         targets.append({"key": "sleep_minutes", "value": 480, "unit": "min", "period": "daily", "mode": "minimum"})
 
-    return {
-        "profile": {"dietary": dietary, "activity_level": "moderate", "onboarding_completed": True},
+    return _enrich_proposal({
+        "profile": {
+            "dietary": dietary,
+            "activity_level": "moderate",
+            "height_cm": height_cm,
+            "birth_year": (user_now("UTC").year - age) if age else None,
+            "sex": sex,
+            "onboarding_completed": True,
+        },
+        "weight_kg": weight_kg,
         "goals": goals_out,
         "targets": targets,
         "events": events,
         "habits": habits_out,
         "memories": memories,
-        "defaults_suggested": {"calories": 2000, "protein_g": 120, "water_ml": 2500},
-    }
+    })

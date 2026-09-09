@@ -283,12 +283,17 @@ export interface AISettings {
 }
 
 export interface OnboardingProposal {
-  profile: { dietary?: Record<string, unknown>; activity_level?: string };
+  profile: {
+    dietary?: Record<string, unknown>; activity_level?: string;
+    height_cm?: number | null; birth_year?: number | null; sex?: string | null;
+  };
+  weight_kg?: number | null;
   goals: { type: string; title: string; start_value?: number; target_value?: number; unit?: string }[];
-  targets: { key: string; value: number; unit: string; period: string }[];
+  targets: { key: string; value: number; unit: string; period: string; source?: string; reason?: string }[];
+  suggested_targets?: { key: string; value: number; unit: string; period: string; source?: string; reason?: string }[];
   events: { type: string; title: string; bydays?: number[]; hour?: number; end_hour?: number }[];
+  workout_plan?: { name: string; days: { name: string; exercises: { name: string; sets?: number; reps?: number }[] }[] } | null;
   memories: { type: string; key: string; value: string }[];
-  defaults_suggested?: { calories: number; protein_g: number; water_ml: number };
 }
 
 // === TRACK C ===

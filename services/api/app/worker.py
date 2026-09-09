@@ -71,6 +71,21 @@ async def _generate_review(db: AsyncSession, job: BackgroundJob) -> None:
     await reviews_service.run_generate_review(db, user, job.payload.get("kind", "weekly"))
 
 
+@handler("onboarding_parse")
+async def _onboarding_parse(db: AsyncSession, job: BackgroundJob) -> None:
+    """Long-running onboarding extraction (CLI/hosted LLMs can take 30-60s).
+
+    The proposal lands in job.payload["result"]; the client polls GET /ai/jobs/{id}.
+    """
+    from .ai import service as ai_service
+
+    user = await db.get(User, job.user_id) if job.user_id else None
+    if user is None:
+        return
+    result = await ai_service.parse_onboarding(db, user, job.payload.get("text", ""))
+    job.payload = {**job.payload, "result": result}
+
+
 @handler("check_reminders")
 async def _check_reminders(db: AsyncSession, job: BackgroundJob) -> None:
     """Push a heads-up for schedule events starting within the user's next 30 min.

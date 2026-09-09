@@ -269,7 +269,11 @@ const apiBase = {
     request<{ id: string; title: string; reason: string | null; priority: string; confidence: number; actions: unknown[] }[]>(
       "/ai/recommendations"),
   updateRecommendation: (id: string, status: string) => patch(`/ai/recommendations/${id}`, { status }),
-  parseOnboarding: (text: string) => post<OnboardingProposal>("/ai/onboarding/parse", { text }),
+  parseOnboarding: (text: string) =>
+    post<{ status: "done"; result: OnboardingProposal } | { status: "pending"; job_id: string }>(
+      "/ai/onboarding/parse", { text }),
+  aiJob: (id: string) =>
+    request<{ id: string; status: string; result?: OnboardingProposal; error?: string }>(`/ai/jobs/${id}`),
   commitOnboarding: (b: unknown) => post("/ai/onboarding/commit", b),
   aiProviders: () => request<{ providers: import("./types").AIProviderInfo[] }>("/ai/providers"),
   aiSettings: () => request<{ ai: import("./types").AISettings }>("/ai/settings"),

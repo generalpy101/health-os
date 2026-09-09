@@ -31,9 +31,28 @@ export default function OnboardingPage() {
   async function parse() {
     setBusy(true);
     try {
-      const p = await api.parseOnboarding(text);
-      setProposal(p as EditableProposal);
-      setStep("review");
+      const res = await api.parseOnboarding(text);
+      if (res.status === "done") {
+        setProposal(res.result as EditableProposal);
+        setStep("review");
+        return;
+      }
+      // real provider → background job; poll until done
+      const jobId = res.job_id;
+      const deadline = Date.now() + 180_000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const job = await api.aiJob(jobId);
+        if (job.status === "done" && job.result) {
+          setProposal(job.result as EditableProposal);
+          setStep("review");
+          return;
+        }
+        if (job.status === "failed") {
+          throw new Error(job.error || "Analysis failed");
+        }
+      }
+      throw new Error("Still working after 3 minutes — try again or pick a faster provider");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not parse", "err");
     } finally {
@@ -58,18 +77,16 @@ export default function OnboardingPage() {
           recurrence: { freq: "weekly", bydays: e.bydays },
         };
       }).filter(Boolean);
-      const targets = [...(proposal.targets || [])];
-      if (proposal.defaults_suggested && !targets.find((t) => t.key === "protein")) {
-        targets.push({ key: "protein", value: proposal.defaults_suggested.protein_g, unit: "g", period: "daily" });
-        targets.push({ key: "water", value: proposal.defaults_suggested.water_ml, unit: "ml", period: "daily" });
-      }
+      const targets = [...(proposal.targets || []), ...(proposal.suggested_targets || [])];
       await api.commitOnboarding({
         profile: proposal.profile,
+        weight_kg: proposal.weight_kg ?? undefined,
         goals: proposal.goals,
         targets,
         events,
         habits: [],
         memories: proposal.memories,
+        workout_plan: proposal.workout_plan ?? undefined,
         replace,
       });
       queryClient.clear();
@@ -122,6 +139,12 @@ export default function OnboardingPage() {
           <Button size="lg" className="mt-6 w-full" disabled={text.trim().length < 10 || busy} onClick={parse}>
             {busy ? "Understanding…" : "Build my plan"}
           </Button>
+          {busy && (
+            <p className="mt-3 text-center text-xs leading-relaxed text-faint">
+              Your AI provider is reading this now — with a CLI provider (Claude Code, Codex, opencode)
+              this can take up to a minute. Keep this tab open; the work continues even if the connection blips.
+            </p>
+          )}
           <button
             className="mt-4 w-full text-center text-sm text-muted hover:text-ink"
             onClick={async () => {
@@ -141,6 +164,27 @@ export default function OnboardingPage() {
           <p className="mt-2 text-sm text-muted">Review and tweak — this becomes your starting setup.</p>
 
           <div className="mt-6 space-y-4">
+            {(proposal.weight_kg || proposal.profile.height_cm || proposal.profile.birth_year || proposal.profile.sex) && (
+              <Card>
+                <div className="mb-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-muted">Your stats</div>
+                <div className="flex flex-wrap gap-2 text-sm">
+                  {proposal.profile.birth_year != null && (
+                    <span className="rounded-lg bg-surface-2 px-2.5 py-1">{new Date().getFullYear() - proposal.profile.birth_year} yrs</span>
+                  )}
+                  {proposal.profile.height_cm != null && (
+                    <span className="rounded-lg bg-surface-2 px-2.5 py-1">{proposal.profile.height_cm} cm</span>
+                  )}
+                  {proposal.weight_kg != null && (
+                    <span className="rounded-lg bg-surface-2 px-2.5 py-1">{proposal.weight_kg} kg</span>
+                  )}
+                  {proposal.profile.sex && (
+                    <span className="rounded-lg bg-surface-2 px-2.5 py-1 capitalize">{proposal.profile.sex}</span>
+                  )}
+                </div>
+                <p className="mt-2 text-[11px] text-faint">Weight is saved as your first measurement, so trends start today.</p>
+              </Card>
+            )}
+
             <Card>
               <div className="mb-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-muted">Goals</div>
               <div className="space-y-2">
@@ -159,17 +203,45 @@ export default function OnboardingPage() {
               </div>
             </Card>
 
-            {proposal.targets.length > 0 && (
+            {(proposal.targets.length > 0 || (proposal.suggested_targets?.length ?? 0) > 0) && (
               <Card>
                 <div className="mb-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-muted">Targets</div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   {proposal.targets.map((t, i) => (
                     <div key={i} className="flex items-center justify-between text-sm">
                       <span className="font-medium capitalize">{t.key.replaceAll("_", " ")}</span>
                       <span className="text-muted">{t.value} {t.unit} / {t.period.replace("ly", "")}</span>
                     </div>
                   ))}
+                  {(proposal.suggested_targets || []).map((t, i) => (
+                    <div key={`s${i}`} className="rounded-xl bg-surface-2/60 px-3 py-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium capitalize">
+                          {t.key.replaceAll("_", " ")}
+                          <span className="ml-2 rounded bg-olive-soft px-1.5 py-0.5 text-[10px] font-bold uppercase text-olive">calculated</span>
+                        </span>
+                        <span className="text-muted">{t.value} {t.unit} / {t.period.replace("ly", "")}</span>
+                      </div>
+                      {t.reason && <p className="mt-1 text-[11px] leading-snug text-faint">{t.reason}</p>}
+                    </div>
+                  ))}
                 </div>
+              </Card>
+            )}
+
+            {proposal.workout_plan && proposal.workout_plan.days.length > 0 && (
+              <Card>
+                <div className="mb-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-muted">Starter training plan</div>
+                <div className="mb-1 text-sm font-semibold">{proposal.workout_plan.name}</div>
+                <div className="space-y-1">
+                  {proposal.workout_plan.days.map((d, i) => (
+                    <div key={i} className="flex items-center justify-between text-sm">
+                      <span className="font-medium">{d.name}</span>
+                      <span className="text-xs text-faint">{d.exercises.length} exercises</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-[11px] text-faint">Fully editable later under Workouts → Plans.</p>
               </Card>
             )}
 

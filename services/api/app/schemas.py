@@ -567,11 +567,13 @@ class OnboardingParseIn(BaseModel):
 
 class OnboardingCommitIn(BaseModel):
     profile: ProfileIn = Field(default_factory=ProfileIn)
+    weight_kg: float | None = Field(default=None, gt=0, lt=500)  # recorded as first measurement
     goals: list[GoalIn] = Field(default_factory=list)
     targets: list[TargetIn] = Field(default_factory=list)
     events: list[EventIn] = Field(default_factory=list)
     habits: list[HabitIn] = Field(default_factory=list)
     memories: list[dict[str, Any]] = Field(default_factory=list)
+    workout_plan: dict[str, Any] | None = None  # {name, days:[{name, exercises:[...]}]}
     replace: bool = False  # redo flow: archive current goals/targets/onboarding events first
 
 

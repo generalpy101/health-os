@@ -138,7 +138,30 @@ async def list_actions(user: User = Depends(current_user), db: AsyncSession = De
 @router.post("/onboarding/parse")
 async def onboarding_parse(data: OnboardingParseIn, user: User = Depends(current_user),
                            db: AsyncSession = Depends(get_db)):
-    return await ai_service.parse_onboarding(db, user, data.text)
+    """Mock provider answers inline (instant). Real providers run as a background
+    job — CLI/hosted models can take a minute, and a long-held HTTP request is
+    fragile (proxy resets on navigation). Poll GET /ai/jobs/{id} for the result."""
+    from ..ai.provider import MockProvider
+    from ..worker import enqueue
+
+    provider = await provider_for_user(db, user)
+    if isinstance(provider, MockProvider):
+        return {"status": "done", "result": await ai_service.parse_onboarding(db, user, data.text)}
+    job = await enqueue(db, "onboarding_parse", {"text": data.text}, user_id=user.id)
+    await db.commit()
+    return {"status": "pending", "job_id": str(job.id)}
+
+
+@router.get("/jobs/{job_id}")
+async def get_job(job_id: UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    from ..models import BackgroundJob
+
+    job = await db.get(BackgroundJob, job_id)
+    if job is None or job.user_id != user.id:
+        raise HTTPException(404, "Job not found")
+    return {"id": str(job.id), "kind": job.kind, "status": job.status,
+            "result": (job.payload or {}).get("result"),
+            "error": job.last_error if job.status == "failed" else None}
 
 
 @router.post("/onboarding/commit")
@@ -179,13 +202,30 @@ async def onboarding_commit(data: OnboardingCommitIn, user: User = Depends(curre
             setattr(profile, key, value)
     profile.onboarding_completed = True
 
-    created: dict[str, list] = {"goals": [], "targets": [], "events": [], "habits": [], "memories": []}
+    created: dict[str, list] = {"goals": [], "targets": [], "events": [], "habits": [], "memories": [], "plans": []}
+    if data.weight_kg:
+        from ..schemas import MeasurementIn
+        from ..services import health as health_service
+        await health_service.record_measurement(
+            db, user, MeasurementIn(type="weight", value=data.weight_kg, unit="kg"))
     for g in data.goals:
+        # backfill goal start_value from the recorded weight when missing
+        if g.start_value is None and data.weight_kg and g.type in ("weight_loss", "weight_gain"):
+            g.start_value = data.weight_kg
+            g.unit = g.unit or "kg"
         goal = await goals_service.create_goal(db, user, g)
         created["goals"].append(str(goal.id))
     for t in data.targets:
         target = await goals_service.create_target(db, user, t)
         created["targets"].append(str(target.id))
+    if data.workout_plan and data.workout_plan.get("days"):
+        from ..schemas import WorkoutPlanIn
+        from ..services import fitness as fitness_service
+        plan = await fitness_service.create_plan(db, user, WorkoutPlanIn(
+            name=data.workout_plan.get("name", "Starter plan"),
+            days=data.workout_plan["days"],
+        ))
+        created["plans"].append(str(plan.id))
     for e in data.events:
         try:
             e.meta = {**(e.meta or {}), "origin": "onboarding"}
