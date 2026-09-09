@@ -38,7 +38,25 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static assets & pages: stale-while-revalidate
+  // HTML pages: network-first (a redeploy must never serve stale HTML that
+  // references deleted JS chunks — that white-screens the app); cache is only
+  // an offline fallback
+  if (request.mode === "navigate" || (request.headers.get("accept") || "").includes("text/html")) {
+    event.respondWith(
+      fetch(request)
+        .then((res) => {
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(SHELL_CACHE).then((c) => c.put(request, clone));
+          }
+          return res;
+        })
+        .catch(() => caches.match(request).then((r) => r || Response.error()))
+    );
+    return;
+  }
+
+  // Static assets: stale-while-revalidate (hashed chunks are immutable)
   event.respondWith(
     caches.match(request).then((cached) => {
       const fresh = fetch(request)

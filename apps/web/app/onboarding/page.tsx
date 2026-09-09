@@ -14,6 +14,21 @@ type EditableProposal = OnboardingProposal & {
   events: { type: string; title: string; bydays?: number[]; hour?: number; end_hour?: number }[];
 };
 
+/** LLMs and fallbacks can both drop keys — never trust the shape. */
+function normalizeProposal(p: unknown): EditableProposal {
+  const o = (p && typeof p === "object" ? p : {}) as Partial<OnboardingProposal>;
+  return {
+    profile: o.profile ?? {},
+    weight_kg: o.weight_kg ?? null,
+    goals: Array.isArray(o.goals) ? o.goals : [],
+    targets: Array.isArray(o.targets) ? o.targets : [],
+    suggested_targets: Array.isArray(o.suggested_targets) ? o.suggested_targets : [],
+    events: Array.isArray(o.events) ? o.events : [],
+    workout_plan: o.workout_plan ?? null,
+    memories: Array.isArray(o.memories) ? o.memories : [],
+  };
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
   const toast = useToast();
@@ -33,7 +48,7 @@ export default function OnboardingPage() {
     try {
       const res = await api.parseOnboarding(text);
       if (res.status === "done") {
-        setProposal(res.result as EditableProposal);
+        setProposal(normalizeProposal(res.result));
         setStep("review");
         return;
       }
@@ -44,7 +59,7 @@ export default function OnboardingPage() {
         await new Promise((r) => setTimeout(r, 2000));
         const job = await api.aiJob(jobId);
         if (job.status === "done" && job.result) {
-          setProposal(job.result as EditableProposal);
+          setProposal(normalizeProposal(job.result));
           setStep("review");
           return;
         }
@@ -164,20 +179,20 @@ export default function OnboardingPage() {
           <p className="mt-2 text-sm text-muted">Review and tweak — this becomes your starting setup.</p>
 
           <div className="mt-6 space-y-4">
-            {(proposal.weight_kg || proposal.profile.height_cm || proposal.profile.birth_year || proposal.profile.sex) && (
+            {(proposal.weight_kg || proposal.profile?.height_cm || proposal.profile?.birth_year || proposal.profile?.sex) && (
               <Card>
                 <div className="mb-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-muted">Your stats</div>
                 <div className="flex flex-wrap gap-2 text-sm">
-                  {proposal.profile.birth_year != null && (
+                  {proposal.profile?.birth_year != null && (
                     <span className="rounded-lg bg-surface-2 px-2.5 py-1">{new Date().getFullYear() - proposal.profile.birth_year} yrs</span>
                   )}
-                  {proposal.profile.height_cm != null && (
+                  {proposal.profile?.height_cm != null && (
                     <span className="rounded-lg bg-surface-2 px-2.5 py-1">{proposal.profile.height_cm} cm</span>
                   )}
                   {proposal.weight_kg != null && (
                     <span className="rounded-lg bg-surface-2 px-2.5 py-1">{proposal.weight_kg} kg</span>
                   )}
-                  {proposal.profile.sex && (
+                  {proposal.profile?.sex && (
                     <span className="rounded-lg bg-surface-2 px-2.5 py-1 capitalize">{proposal.profile.sex}</span>
                   )}
                 </div>
@@ -229,12 +244,12 @@ export default function OnboardingPage() {
               </Card>
             )}
 
-            {proposal.workout_plan && proposal.workout_plan.days.length > 0 && (
+            {(proposal.workout_plan?.days?.length ?? 0) > 0 && (
               <Card>
                 <div className="mb-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-muted">Starter training plan</div>
-                <div className="mb-1 text-sm font-semibold">{proposal.workout_plan.name}</div>
+                <div className="mb-1 text-sm font-semibold">{proposal.workout_plan!.name}</div>
                 <div className="space-y-1">
-                  {proposal.workout_plan.days.map((d, i) => (
+                  {proposal.workout_plan!.days.map((d, i) => (
                     <div key={i} className="flex items-center justify-between text-sm">
                       <span className="font-medium">{d.name}</span>
                       <span className="text-xs text-faint">{d.exercises.length} exercises</span>
