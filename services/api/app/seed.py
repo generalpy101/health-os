@@ -70,6 +70,11 @@ FOODS: list[tuple[str, float, str, float, float, float, float, float]] = [
     ("Coconut water", 100, "ml", 19, 0.7, 3.7, 0.2, 1.1),
     ("Whole egg (boiled)", 1, "piece", 78, 6.3, 0.6, 5.3, 0),
     ("Peanuts", 28, "g", 161, 7.3, 4.6, 14, 2.4),
+    ("Carrot", 1, "piece", 25, 0.6, 5.8, 0.1, 1.7),
+    ("Cucumber", 100, "g", 15, 0.7, 3.6, 0.1, 0.5),
+    ("Capsicum / bell pepper", 100, "g", 31, 1, 6, 0.3, 2.1),
+    ("Green peas (cooked)", 100, "g", 84, 5.4, 15.6, 0.2, 5.5),
+    ("Cauliflower (cooked)", 100, "g", 23, 1.8, 4.1, 0.5, 2.3),
 ]
 
 # name, muscle_groups, movement_pattern, equipment, difficulty

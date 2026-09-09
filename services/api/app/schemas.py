@@ -220,6 +220,7 @@ class FoodLogPatch(BaseModel):
     meal_type: str | None = None
     note: str | None = None
     time: str | None = None  # "HH:MM" local — when it was eaten
+    items: list[FoodLogItemIn] | None = None  # full replacement; totals recomputed
 
 
 class FoodLogOut(ORMModel):

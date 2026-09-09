@@ -54,7 +54,8 @@ async def list_food_logs(day: date | None = None, start: date | None = None, end
 async def patch_food_log(log_id: UUID, data: FoodLogPatch, user: User = Depends(current_user),
                          db: AsyncSession = Depends(get_db)):
     return await nutrition_service.update_food_log(
-        db, user, log_id, meal_type=data.meal_type, note=data.note, time=data.time)
+        db, user, log_id, meal_type=data.meal_type, note=data.note, time=data.time,
+        items=data.items)
 
 
 @router.delete("/food-logs/{log_id}", status_code=204)

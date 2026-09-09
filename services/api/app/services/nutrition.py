@@ -6,7 +6,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Food, FoodLog, User
-from ..schemas import FoodIn, FoodLogIn
+from ..schemas import FoodIn, FoodLogIn, FoodLogItemIn
 from ..utils import metrics
 from ..utils.time import parse_date
 from . import food_providers
@@ -133,8 +133,16 @@ async def _resolve_item(db: AsyncSession, user: User, item: dict) -> dict:
         if exact_match is not None:
             food = exact_match
         elif matches:
-            # fuzzy: prefer the shortest (most generic) match, flagged as an estimate
-            food = min(matches, key=lambda f: len(f.name))
+            # fuzzy: rank by word overlap with the query, then shortest name;
+            # "cooked white rice" must land on "White rice (cooked)", never "Chole (cooked)"
+            query_words = set(re.split(r"[\s()]+", name_l)) - {"", "cooked", "the", "a"}
+
+            def relevance(f: Food) -> tuple[int, int]:
+                food_words = set(re.split(r"[\s()]+", f.name.lower())) - {""}
+                overlap = len(query_words & food_words)
+                return (-overlap, len(f.name))
+
+            food = min(matches, key=relevance)
             exact = False
     if food is not None:
         out["food_id"] = str(food.id)
@@ -220,8 +228,14 @@ async def delete_food_log(db: AsyncSession, user: User, log_id: UUID) -> None:
 
 async def update_food_log(db: AsyncSession, user: User, log_id: UUID, *,
                           meal_type: str | None = None, note: str | None = None,
-                          time: str | None = None) -> FoodLog:
-    """Edit log metadata (never the nutrient math — items stay snapshotted)."""
+                          time: str | None = None,
+                          items: list[FoodLogItemIn] | None = None) -> FoodLog:
+    """Edit a log: metadata, eaten time, or corrected items.
+
+    When items are provided they replace the log's items and totals are
+    recomputed deterministically (explicit per-item nutrients always win over
+    the database lookup — user labels beat generic references).
+    """
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo
 
@@ -238,6 +252,13 @@ async def update_food_log(db: AsyncSession, user: User, log_id: UUID, *,
         except (ValueError, AttributeError):
             from fastapi import HTTPException
             raise HTTPException(422, "time must be HH:MM")
+    if items is not None:
+        resolved = [await _resolve_item(db, user, i.model_dump()) for i in items]
+        log.items = resolved
+        for key, value in metrics.sum_items(resolved).items():
+            setattr(log, key, value)
+        await audit(db, user.id, "food_log_corrected", "food_log", log.id,
+                    {"calories": log.calories, "items": len(resolved)})
     await db.commit()
     await db.refresh(log)
     return log

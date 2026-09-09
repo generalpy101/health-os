@@ -9,7 +9,7 @@ import {
   Button, Card, CardTitle, Empty, Field, Input, PageLoading, Select, Sheet, Spinner, useToast,
 } from "@/components/ui";
 import { api } from "@/lib/api";
-import type { Food } from "@/lib/types";
+import type { Food, FoodLog } from "@/lib/types";
 import { MEAL_TYPES, cx, fmtNumber, todayISO } from "@/lib/utils";
 import { ImportSheet } from "./import-sheet";
 
@@ -17,6 +17,7 @@ export default function NutritionPage() {
   const [day, setDay] = useState(todayISO());
   const [logOpen, setLogOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [editItem, setEditItem] = useState<{ log: FoodLog; index: number } | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ["nutrition", day],
     queryFn: () => api.dailyNutrition(day),
@@ -98,14 +99,15 @@ export default function NutritionPage() {
                   </CardTitle>
                   <ul className="divide-y divide-line">
                     {log.items.map((item, i) => (
-                      <li key={i} className="flex items-center justify-between py-2 text-sm">
-                        <span>
-                          {item.name}
+                      <li key={i} className="group flex items-center justify-between py-2 text-sm">
+                        <button className="min-w-0 flex-1 text-left" onClick={() => setEditItem({ log, index: i })}>
+                          <span className="group-hover:text-accent">{item.name}</span>
                           <span className="ml-2 text-xs text-faint">
                             {fmtNumber(item.quantity)}{item.unit}
                             {item.unmatched && <span className="ml-1 text-gold">· not in database</span>}
+                            {item.estimated && !item.unmatched && <span className="ml-1 text-gold">· est</span>}
                           </span>
-                        </span>
+                        </button>
                         <span className="text-muted">{fmtNumber(item.calories)} kcal · {fmtNumber(item.protein)}g P</span>
                       </li>
                     ))}
@@ -132,8 +134,75 @@ export default function NutritionPage() {
         )}
       </main>
       <LogFoodSheet open={logOpen} onClose={() => setLogOpen(false)} day={day} />
+      <EditItemSheet target={editItem} onClose={() => setEditItem(null)} />
       <ImportSheet open={importOpen} onClose={() => setImportOpen(false)} />
     </>
+  );
+}
+
+/** Correct one logged item: your label/knowledge beats the database (spec §61). */
+function EditItemSheet({ target, onClose }: { target: { log: FoodLog; index: number } | null; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const item = target?.log.items[target.index];
+  const [quantity, setQuantity] = useState("");
+  const [calories, setCalories] = useState("");
+  const [protein, setProtein] = useState("");
+
+  useEffect(() => {
+    if (item) {
+      setQuantity(String(item.quantity));
+      setCalories(String(item.calories));
+      setProtein(String(item.protein));
+    }
+  }, [target]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const save = useMutation({
+    mutationFn: () => {
+      if (!target) return Promise.reject(new Error("nothing to save"));
+      const items = target.log.items.map((it, i) => ({
+        name: it.name,
+        quantity: i === target.index ? parseFloat(quantity) || it.quantity : it.quantity,
+        unit: it.unit,
+        food_id: it.food_id || undefined,
+        ...(i === target.index
+          ? { calories: parseFloat(calories) || 0, protein: parseFloat(protein) || 0, estimated: false }
+          : {}),
+      }));
+      return api.updateFoodLog(target.log.id, { items });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries();
+      toast("Corrected — totals recalculated");
+      onClose();
+    },
+    onError: (e) => toast(e.message, "err"),
+  });
+
+  if (!target || !item) return null;
+  return (
+    <Sheet open={!!target} onClose={onClose} title={`Fix: ${item.name}`}>
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+        <p className="text-xs leading-relaxed text-faint">
+          Have the real numbers (package label, recipe you made)? Enter them — they win over the database.
+          This is a correction, stored as your value.
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          <Field label={`Qty (${item.unit})`}>
+            <Input inputMode="decimal" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+          </Field>
+          <Field label="Calories">
+            <Input inputMode="decimal" value={calories} onChange={(e) => setCalories(e.target.value)} />
+          </Field>
+          <Field label="Protein (g)">
+            <Input inputMode="decimal" value={protein} onChange={(e) => setProtein(e.target.value)} />
+          </Field>
+        </div>
+        <Button type="submit" className="w-full" disabled={save.isPending}>
+          {save.isPending ? "Saving…" : "Save correction"}
+        </Button>
+      </form>
+    </Sheet>
   );
 }
 

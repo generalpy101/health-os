@@ -1,7 +1,7 @@
 import json
 import os
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
@@ -104,7 +104,9 @@ async def test_import_preview_rejects_garbage(client):
 @pytest.mark.asyncio
 async def test_import_commit_measurements(client):
     await auth(client)
-    day = date.today().isoformat()  # /measurements only serves a recent window
+    # use the server clock (user tz defaults to UTC) — local-midnight skew otherwise
+    # dates rows into the server's "tomorrow" and out of the listing window
+    day = datetime.now(timezone.utc).date().isoformat()
     rows = [
         {"date": day, "type": "weight", "value": 81.2, "unit": "kg"},
         {"date": day, "type": "waist", "value": 88, "unit": "cm"},
