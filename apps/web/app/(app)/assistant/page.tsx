@@ -1,21 +1,21 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, CheckCircle2, Sparkles, XCircle } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowUp, CheckCircle2, History, Plus, Sparkles, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Empty, Spinner } from "@/components/ui";
+import { Empty, Sheet, Spinner } from "@/components/ui";
 import { ProviderPicker } from "@/components/ai-picker";
 import { api } from "@/lib/api";
 import type { ChatAction, ChatMessage } from "@/lib/types";
-import { cx } from "@/lib/utils";
+import { cx, fmtDate, fmtTime } from "@/lib/utils";
 
 const SUGGESTIONS = [
+  "How am I doing today?",
+  "What should I eat for dinner?",
   "Log two eggs and 200g rice for lunch",
   "Drank 750ml water",
-  "Weighed 81.3 this morning",
   "I slept 6.5 hours",
-  "How am I doing today?",
-  "Set my protein target to 140g",
+  "Make me a high-protein Indian dinner recipe under 30 min",
 ];
 
 export default function AssistantPage() {
@@ -23,13 +23,27 @@ export default function AssistantPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const queryClient = useQueryClient();
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const { data: conversations } = useQuery({ queryKey: ["conversations"], queryFn: api.conversations });
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
+
+  // resume the most recent conversation from today automatically
+  useEffect(() => {
+    if (!conversations?.length || conversationId || messages.length) return;
+    const latest = conversations[0];
+    const today = new Date().toDateString();
+    if (new Date(latest.updated_at).toDateString() === today) {
+      openConversation(latest.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations]);
 
   // command palette hands a message over via sessionStorage
   useEffect(() => {
@@ -40,6 +54,27 @@ export default function AssistantPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function openConversation(id: string) {
+    try {
+      const msgs = await api.conversationMessages(id);
+      setConversationId(id);
+      setMessages(
+        msgs.filter((m) => m.role === "user" || m.role === "assistant")
+            .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
+      );
+      setHistoryOpen(false);
+    } catch {
+      // conversation gone — just start fresh
+    }
+  }
+
+  function newChat() {
+    setConversationId(undefined);
+    setMessages([]);
+    setHistoryOpen(false);
+    inputRef.current?.focus();
+  }
 
   // both helpers lazily open the assistant bubble on first server output
   function patchLast(patch: Partial<ChatMessage>) {
@@ -81,6 +116,7 @@ export default function AssistantPage() {
         },
       });
       queryClient.invalidateQueries(); // AI actions may have changed anything
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
     } catch (e) {
       if (!arrived) {
         // stream never got going (offline, proxy, old server) — one-shot plain fallback
@@ -106,11 +142,49 @@ export default function AssistantPage() {
     <div className="mx-auto flex h-[calc(100dvh-6rem)] max-w-3xl flex-col md:h-[calc(100dvh-2rem)]">
       <header className="flex items-center gap-2 border-b border-line px-4 py-3.5 sm:px-6">
         <Sparkles size={17} className="text-accent" />
-        <h1 className="font-display text-lg font-semibold tracking-tight">Assistant</h1>
+        <h1 className="font-display text-lg font-semibold tracking-tight">Coach</h1>
         <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setHistoryOpen(true)}
+            aria-label="Chat history"
+            className="rounded-xl border border-line bg-surface p-2 text-muted transition-colors hover:text-ink"
+          >
+            <History size={16} />
+          </button>
+          <button
+            onClick={newChat}
+            aria-label="New chat"
+            className="rounded-xl border border-line bg-surface p-2 text-muted transition-colors hover:text-ink"
+          >
+            <Plus size={16} />
+          </button>
           <ProviderPicker />
         </div>
       </header>
+
+      <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title="Conversations">
+        {!conversations?.length ? (
+          <p className="py-6 text-center text-sm text-faint">No past conversations.</p>
+        ) : (
+          <div className="space-y-0.5">
+            {conversations.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => openConversation(c.id)}
+                className={cx(
+                  "flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-surface-2",
+                  c.id === conversationId && "bg-surface-2"
+                )}
+              >
+                <span className="min-w-0 truncate text-sm font-medium">{c.title || "Conversation"}</span>
+                <span className="shrink-0 text-[11px] text-faint">
+                  {fmtDate(c.updated_at.slice(0, 10))} {fmtTime(c.updated_at)}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </Sheet>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-6">
         {messages.length === 0 && (

@@ -7,6 +7,7 @@ import json
 import re
 import time
 from collections.abc import AsyncGenerator
+from datetime import timedelta
 from contextlib import suppress
 from uuid import UUID
 
@@ -22,23 +23,42 @@ from .provider import AIProvider, MockProvider
 from .registry import provider_for_user
 from .tools import REGISTRY, _s, execute_tool, tool_schemas
 
-SYSTEM_PROMPT = """You are the assistant inside a personal health & fitness OS.
-You operate the app through tools — never invent numbers; use tools to read real data
-and to log or change things. Deterministic math (calories, trends, BMI) is done by the
-system, not by you. Never present estimates as exact facts. Never give medical diagnoses;
-for symptoms, medication, injuries or eating-disorder concerns, point to a professional.
-Keep replies concise and concrete. When you change something, say what changed.
+SYSTEM_PROMPT = """You are the user's personal health & fitness coach inside their health OS — not a
+generic chatbot. You know their goals, targets, schedule, preferences and recent behavior
+(context below), and you operate the app through tools.
 
-IMPORTANT — exactly-once logging: within a single reply, log each real-world item or event
-exactly ONCE. If you need a custom food/exercise first, create it FIRST, then log once with it.
-Never repeat a logging call with refined arguments; the user can edit instead.
+COACHING STYLE:
+- Sound like a sharp, supportive human coach: direct, warm, specific. Short paragraphs.
+- Always ground answers in THEIR data (targets, today's numbers, schedule, streaks, memories) —
+  fetch with tools when the context block isn't enough.
+- Recommend ONE clear next action when useful ("prioritize ~50g protein at dinner" beats a list of ten tips).
+- Never moralize. Off-plan days are data, not failure — help them get the next choice right.
+- Respect stated preferences (meal structure, cuisine, equipment, schedule) from memories; if a request
+  conflicts with a preference, note the tradeoff briefly.
+- If a goal has a target_date, you may mention time-frames using the local date in context.
 
-Current user context:
+OPERATING RULES:
+- Act through tools — never invent numbers; deterministic math (calories, trends, BMI) is the system's job.
+- Never present estimates as exact facts. Never diagnose; for symptoms, medication, injuries or
+  eating-disorder concerns, point to a professional.
+- When you change something, say exactly what changed. Keep it brief.
+- Logging requests ("had X", "slept Y", "weighed Z"): log immediately, confirm with the key numbers,
+  and add at most one short relevant observation (e.g. remaining calories) — no lectures.
+- Exactly-once logging: within a single reply, log each real-world item or event exactly ONCE.
+  If you need a custom food/exercise first, create it FIRST, then log once with it.
+  Never repeat a logging call with refined arguments; the user can edit instead.
+- Ambiguous log (no quantities, unclear which meal)? Log nothing; ask ONE focused question.
+
+CURRENT USER CONTEXT (live, authoritative):
 {context}
 """
 
 
 async def _context_block(db: AsyncSession, user: User) -> str:
+    from ..services import habits as habits_service
+    from ..services import health as health_service
+    from ..services import schedule as schedule_service
+
     profile = (await db.execute(select(UserProfile).where(UserProfile.user_id == user.id))).scalar_one_or_none()
     targets = await goals_service.targets_map(db, user)
     active_goals = await goals_service.list_goals(db, user, status_filter="active")
@@ -46,12 +66,36 @@ async def _context_block(db: AsyncSession, user: User) -> str:
         select(UserMemory).where(UserMemory.user_id == user.id, UserMemory.status == "active")
         .order_by(UserMemory.confidence.desc()).limit(12)
     )).scalars().all()
+
+    ctx: dict = {}
     try:
         summary = await analytics_service.daily_summary(db, user)
-        today = {k: summary[k] for k in ("nutrition", "water_ml", "sleep_minutes", "workout_count",
-                                         "habits_completed", "habits_total", "weight")}
+        ctx["today"] = {k: summary[k] for k in ("nutrition", "water_ml", "sleep_minutes", "workout_count",
+                                                "habits_completed", "habits_total", "weight")}
+        ctx["today"]["schedule"] = [{"title": e["title"], "type": e["type"],
+                                     "start": e["start_at"].isoformat()} for e in summary["schedule"][:6]]
     except Exception:
-        today = {}
+        pass
+    try:
+        today = user_now(user.timezone).date()
+        tomorrow_events = await schedule_service.get_schedule(db, user, today + timedelta(days=1), today + timedelta(days=1))
+        ctx["tomorrow"] = [{"title": e["title"], "type": e["type"], "start": e["start_at"].isoformat()}
+                           for e in tomorrow_events[:6]]
+    except Exception:
+        pass
+    try:
+        ctx["habit_streaks"] = [{"name": h["name"], "streak": h["streak"], "done_today": h["today_status"] == "completed"}
+                                for h in await habits_service.habit_progress(db, user, days=1)]
+    except Exception:
+        pass
+    try:
+        trend = await health_service.weight_trend(db, user, today - timedelta(days=30), today)
+        if trend["points"]:
+            ctx["weight_trend"] = {"latest": trend["points"][-1]["value"],
+                                   "weekly_rate": trend["weekly_rate"], "points_30d": len(trend["points"])}
+    except Exception:
+        pass
+
     return json.dumps({
         "name": user.name, "timezone": user.timezone, "units": user.units,
         "local_time": user_now(user.timezone).isoformat(timespec="minutes"),
@@ -60,10 +104,11 @@ async def _context_block(db: AsyncSession, user: User) -> str:
             "activity_level": profile.activity_level if profile else None,
             "dietary": profile.dietary if profile else {},
         },
-        "active_goals": [{"type": g.type, "title": g.title, "target": g.target_value, "unit": g.unit} for g in active_goals[:6]],
+        "active_goals": [{"type": g.type, "title": g.title, "target": g.target_value, "unit": g.unit,
+                          "target_date": str(g.target_date) if g.target_date else None} for g in active_goals[:6]],
         "daily_targets": targets,
-        "today": today,
         "memories": [{"type": m.type, "key": m.key, "value": m.value.get("value"), "confidence": m.confidence} for m in mems],
+        **ctx,
     }, default=str)
 
 
@@ -226,7 +271,7 @@ ONBOARDING_PROMPT = """You are setting up a personal health OS for a new user. R
  "targets": [{"key": "calories|protein|water|steps|sleep_minutes|workouts|swimming", "value": number, "unit": str, "period": "daily|weekly", "mode": "minimum|range"?, "range_low": number?, "range_high": number?}],
  "events": [{"type": "workout|swimming|work|sleep|meal|custom", "title": str, "bydays": [0-6, Monday=0], "hour": 0-23, "minute": 0-59?, "end_hour": 0-23?}],
  "workout_plan": {"name": str, "days": [{"name": str, "exercises": [{"name": str, "sets": number, "reps": number}]}]}?,
- "habits": [{"name": str}?,
+ "habits": [{"name": str}]?,
  "memories": [{"type": "fact|preference", "key": snake_case, "value": str}],
  "dietary": {"diet": str?, "dislikes": [str]}}
 
