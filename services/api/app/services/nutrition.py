@@ -1,5 +1,5 @@
 import re
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
@@ -8,9 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import Food, FoodLog, User
 from ..schemas import FoodIn, FoodLogIn, FoodLogItemIn
 from ..utils import metrics
-from ..utils.time import parse_date
+from ..utils.time import day_window, parse_date
 from . import food_providers
-from .common import audit, get_owned
+from .common import audit, day_start_minutes, get_owned
 
 
 async def search_foods(db: AsyncSession, user: User, query: str = "", limit: int = 20) -> list[Food]:
@@ -208,15 +208,16 @@ async def log_food(db: AsyncSession, user: User, data: FoodLogIn, source: str | 
 async def list_food_logs(db: AsyncSession, user: User, day: date | None = None,
                          start: date | None = None, end: date | None = None,
                          limit: int = 50, offset: int = 0) -> list[FoodLog]:
+    if day is not None and start is None and end is None:
+        return (await _logs_for_day(db, user, day, limit))[offset:]
     stmt = select(FoodLog).where(FoodLog.user_id == user.id)
-    if day:
-        stmt = stmt.where(FoodLog.date == day)
     if start:
         stmt = stmt.where(FoodLog.date >= start)
     if end:
         stmt = stmt.where(FoodLog.date <= end)
-    stmt = stmt.order_by(FoodLog.date.desc(), FoodLog.created_at.desc()).limit(min(limit, 200)).offset(offset)
-    result = await db.execute(stmt)
+    result = await db.execute(
+        stmt.order_by(FoodLog.date.desc(), FoodLog.created_at.desc()).limit(min(limit, 200)).offset(offset)
+    )
     return list(result.scalars().all())
 
 
@@ -265,17 +266,49 @@ async def update_food_log(db: AsyncSession, user: User, log_id: UUID, *,
     return log
 
 
-async def daily_totals(db: AsyncSession, user: User, day: date) -> dict:
+async def _effective_dt(log: FoodLog, tz_name: str) -> datetime:
+    """When the meal happened: eaten_at when set, else noon of its calendar date
+    (legacy rows — noon sits inside any sane day boundary)."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    if log.eaten_at is not None:
+        return log.eaten_at if log.eaten_at.tzinfo else log.eaten_at.replace(tzinfo=timezone.utc)
+    return _dt(log.date.year, log.date.month, log.date.day, 12, 0, tzinfo=ZoneInfo(tz_name))
+
+
+async def _logs_for_day(db: AsyncSession, user: User, day: date, limit: int = 200) -> list[FoodLog]:
+    """Logs belonging to `day` — calendar date, or the user's custom day window."""
+    boundary = await day_start_minutes(db, user)
+    win = day_window(day, user.timezone, boundary)
+    if win is None:
+        result = await db.execute(
+            select(FoodLog).where(FoodLog.user_id == user.id, FoodLog.date == day)
+            .order_by(FoodLog.created_at.desc()).limit(limit)
+        )
+        return list(result.scalars().all())
+    start, end = win
+    start_utc = start.astimezone(timezone.utc)
+    end_utc = end.astimezone(timezone.utc)
     result = await db.execute(
-        select(
-            func.coalesce(func.sum(FoodLog.calories), 0),
-            func.coalesce(func.sum(FoodLog.protein), 0),
-            func.coalesce(func.sum(FoodLog.carbs), 0),
-            func.coalesce(func.sum(FoodLog.fat), 0),
-            func.coalesce(func.sum(FoodLog.fiber), 0),
-        ).where(FoodLog.user_id == user.id, FoodLog.date == day)
+        select(FoodLog).where(FoodLog.user_id == user.id, FoodLog.date.in_([day, day + timedelta(days=1)]))
+        .order_by(FoodLog.created_at.desc()).limit(limit)
     )
-    cal, pro, carb, fat, fiber = result.one()
+    out = []
+    for log in result.scalars().all():
+        ts = await _effective_dt(log, user.timezone)
+        if start_utc <= ts < end_utc:
+            out.append(log)
+    return out
+
+
+async def daily_totals(db: AsyncSession, user: User, day: date) -> dict:
+    logs = await _logs_for_day(db, user, day)
+    cal = sum(l.calories for l in logs)
+    pro = sum(l.protein for l in logs)
+    carb = sum(l.carbs for l in logs)
+    fat = sum(l.fat for l in logs)
+    fiber = sum(l.fiber for l in logs)
     return {"date": day, "calories": round(cal, 1), "protein": round(pro, 1),
             "carbs": round(carb, 1), "fat": round(fat, 1), "fiber": round(fiber, 1)}
 

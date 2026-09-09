@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -13,6 +13,33 @@ from .common import audit, get_owned
 
 # ---------- water ----------
 
+async def _water_for_day(db: AsyncSession, user: User, day: date) -> list[WaterLog]:
+    """Water logs for the calendar day, or the user's custom day window when set."""
+    from ..utils.time import day_window
+    from .common import day_start_minutes
+
+    win = day_window(day, user.timezone, await day_start_minutes(db, user))
+    if win is None:
+        result = await db.execute(
+            select(WaterLog).where(WaterLog.user_id == user.id, WaterLog.date == day)
+            .order_by(WaterLog.created_at.desc())
+        )
+        return list(result.scalars().all())
+    start, end = win
+    start_utc = start.astimezone(timezone.utc)
+    end_utc = end.astimezone(timezone.utc)
+    result = await db.execute(
+        select(WaterLog).where(WaterLog.user_id == user.id, WaterLog.date.in_([day, day + timedelta(days=1)]))
+        .order_by(WaterLog.created_at.desc())
+    )
+    out = []
+    for log in result.scalars().all():
+        ts = log.created_at if log.created_at.tzinfo else log.created_at.replace(tzinfo=timezone.utc)
+        if start_utc <= ts < end_utc:
+            out.append(log)
+    return out
+
+
 async def log_water(db: AsyncSession, user: User, data: WaterIn) -> WaterLog:
     log = WaterLog(user_id=user.id, date=parse_date(data.date, user.timezone), amount_ml=data.amount_ml)
     db.add(log)
@@ -22,20 +49,11 @@ async def log_water(db: AsyncSession, user: User, data: WaterIn) -> WaterLog:
 
 
 async def water_total(db: AsyncSession, user: User, day: date) -> float:
-    result = await db.execute(
-        select(func.coalesce(func.sum(WaterLog.amount_ml), 0)).where(
-            WaterLog.user_id == user.id, WaterLog.date == day
-        )
-    )
-    return round(result.scalar_one(), 1)
+    return round(sum(l.amount_ml for l in await _water_for_day(db, user, day)), 1)
 
 
 async def list_water(db: AsyncSession, user: User, day: date) -> list[WaterLog]:
-    result = await db.execute(
-        select(WaterLog).where(WaterLog.user_id == user.id, WaterLog.date == day)
-        .order_by(WaterLog.created_at.desc())
-    )
-    return list(result.scalars().all())
+    return await _water_for_day(db, user, day)
 
 
 async def delete_water(db: AsyncSession, user: User, log_id: UUID) -> None:

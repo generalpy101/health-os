@@ -8,10 +8,38 @@ os.environ.setdefault("AI_PROVIDER", "mock")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
+from datetime import datetime, timedelta, timezone
 from httpx import ASGITransport, AsyncClient
 
 from app.ai.service import _parse_onboarding_keywords
 from app.main import app
+
+
+@pytest.mark.asyncio
+async def test_custom_day_boundary_shifts_totals():
+    """With 'my day starts at noon', a 1 AM meal belongs to yesterday's window."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        async with app.router.lifespan_context(app):
+            await c.post("/api/v1/auth/signup", json={"email": "bd@x.co", "password": "password123"})
+            await c.put("/api/v1/users/me/preferences", json={"data": {"day_start_minutes": 720}})
+
+            # log a meal, then move its eaten_at to 01:00 UTC today (past midnight, pre-noon)
+            r = await c.post("/api/v1/food-logs", json={
+                "meal_type": "snack", "items": [{"name": "Banana", "quantity": 1, "unit": "piece"}]})
+            log_id = r.json()["id"]
+            today_utc = datetime.now(timezone.utc).date()
+            eaten_1am = datetime(today_utc.year, today_utc.month, today_utc.day, 1, 0, tzinfo=timezone.utc)
+            # set via the patch endpoint against the log's stored date
+            await c.patch(f"/api/v1/food-logs/{log_id}", json={"time": "01:00"})
+
+            now = datetime.now(timezone.utc)
+            # a 1 AM entry with a noon boundary ALWAYS belongs to the window that
+            # started yesterday at noon — regardless of when the test runs
+            logical_day = (now - timedelta(days=1)).date()
+            in_window = await c.get("/api/v1/nutrition/daily", params={"day": logical_day.isoformat()})
+            assert in_window.json()["calories"] == 105.0
+            in_calendar_day = await c.get("/api/v1/nutrition/daily", params={"day": now.date().isoformat()})
+            assert in_calendar_day.json()["calories"] == (0.0 if now.hour >= 1 else 105.0)
 
 
 def test_keyword_parser_extracts_stats_and_enriches():

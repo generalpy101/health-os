@@ -13,8 +13,9 @@ export default function TodayPage() {
   const queryClient = useQueryClient();
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.me });
   const { data: summary, isLoading } = useQuery({
-    queryKey: ["daily", day],
-    queryFn: () => api.dailySummary(day),
+    // no date: the server computes the current logical day (respects "my day starts at")
+    queryKey: ["daily", "now"],
+    queryFn: () => api.dailySummary(),
   });
   const { data: habits } = useQuery({ queryKey: ["habits-progress"], queryFn: () => api.habitsProgress(1) });
 

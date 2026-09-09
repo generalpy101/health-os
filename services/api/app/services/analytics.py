@@ -15,7 +15,10 @@ from . import schedule as schedule_service
 
 
 async def daily_summary(db: AsyncSession, user: User, day: date | None = None) -> dict:
-    day = day or user_today(user.timezone)
+    if day is None:
+        from .common import day_start_minutes
+        from ..utils.time import logical_today
+        day = logical_today(user.timezone, await day_start_minutes(db, user))
     nutrition = await nutrition_service.daily_totals(db, user, day)
     water = await health_service.water_total(db, user, day)
     sleep_q = await db.execute(

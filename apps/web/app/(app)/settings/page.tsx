@@ -116,6 +116,9 @@ export default function SettingsPage() {
                 <Input name="timezone" defaultValue={me.timezone} placeholder="Asia/Kolkata" />
               </Field>
               <Field label="Height (cm)"><Input name="height" inputMode="decimal" defaultValue={profile.height_cm ?? ""} /></Field>
+              <Field label='My day starts at' hint="For night-shift schedules: set e.g. 12:00 and a 1 AM meal counts toward the day that began yesterday at noon">
+                <DayBoundaryField />
+              </Field>
               <Field label="Activity level">
                 <Select name="activity" defaultValue={profile.activity_level || "moderate"}>
                   {["sedentary", "light", "moderate", "active", "very_active"].map((a) => (
@@ -290,6 +293,32 @@ function ModelPicker({ providerId, kind, model, setModel, baseUrl, placeholder }
         <p className="mt-1.5 text-xs text-faint">Using {defaultLabel}</p>
       )}
     </Field>
+  );
+}
+
+function DayBoundaryField() {
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const { data: prefs } = useQuery({ queryKey: ["preferences"], queryFn: api.preferences });
+  const current = (prefs?.data?.day_start_minutes as number | undefined) ?? 0;
+  const hhmm = `${String(Math.floor(current / 60)).padStart(2, "0")}:${String(current % 60).padStart(2, "0")}`;
+  const save = useMutation({
+    mutationFn: (minutes: number) => api.updatePreferences({ day_start_minutes: minutes }),
+    onSuccess: (_data, minutes) => {
+      queryClient.invalidateQueries();
+      toast(minutes ? "Day boundary saved" : "Back to calendar days");
+    },
+    onError: (e) => toast(e.message, "err"),
+  });
+  return (
+    <Input
+      type="time"
+      value={hhmm}
+      onChange={(e) => {
+        const [h, m] = e.target.value.split(":").map(Number);
+        save.mutate(h * 60 + m);
+      }}
+    />
   );
 }
 
