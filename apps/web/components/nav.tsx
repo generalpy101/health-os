@@ -2,8 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity, Bell, CalendarDays, CalendarRange, ChefHat, Dumbbell, Home, MessageCircle, ScrollText, Settings,
-  TrendingUp,
+  Activity, Bell, CalendarDays, CalendarRange, ChefHat, Dumbbell, Home, MessageCircle, Package, ScrollText,
+  Settings, TrendingUp,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -17,6 +17,7 @@ const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: Activity },
   { href: "/nutrition", label: "Nutrition", icon: ChefHat },
   { href: "/meals", label: "Meals", icon: CalendarRange },
+  { href: "/pantry", label: "Pantry", icon: Package },
   { href: "/workouts", label: "Workouts", icon: Dumbbell },
   { href: "/schedule", label: "Planner", icon: CalendarDays },
   { href: "/progress", label: "Progress", icon: TrendingUp },
@@ -25,7 +26,8 @@ const NAV = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-const MOBILE = [NAV[0], NAV[1], NAV[2], NAV[4], NAV[6]];
+const MOBILE_HREFS = ["/today", "/dashboard", "/nutrition", "/workouts", "/progress"];
+const MOBILE = MOBILE_HREFS.map((h) => NAV.find((n) => n.href === h)!);
 
 export function Sidebar() {
   const pathname = usePathname();

@@ -1,14 +1,16 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import Link from "next/link";
+import { useMemo, useRef, useState } from "react";
 import {
   Bar, BarChart, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { TopBar } from "@/components/nav";
 import { Button, Card, CardTitle, Empty, PageLoading, Segmented, Stat, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
-import { fmtDate, fmtDuration, fmtNumber } from "@/lib/utils";
+import type { ActivityDay } from "@/lib/types";
+import { cx, fmtDate, fmtDuration, fmtNumber } from "@/lib/utils";
 
 const RANGES = [
   { value: 7, label: "7D" },
@@ -28,6 +30,8 @@ export default function ProgressPage() {
           <PageLoading />
         ) : (
           <>
+            <ActivityHeatmap />
+            <StallCard />
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Card className="p-4">
                 <Stat label="Avg calories" value={fmtNumber(data.avg_calories)} unit="kcal/d" tone="var(--accent)" />
@@ -246,5 +250,127 @@ function MeasurementExplorer() {
         )}
       </Card>
     </>
+  );
+}
+
+// ---------- TRACK D: activity heatmap + stall card ----------
+
+const HEAT_COLORS = ["var(--surface-2)", "var(--olive-soft)", "var(--olive)", "var(--accent)"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function dayTip(d: ActivityDay): string {
+  const parts: string[] = [];
+  if (d.workouts > 0) parts.push(`${d.workouts} workout${d.workouts > 1 ? "s" : ""}`);
+  if (d.logged_food) parts.push("food logged");
+  if (d.habits_total > 0) parts.push(`${d.habits_done}/${d.habits_total} habits`);
+  return `${fmtDate(d.date)} — ${parts.join(", ") || "nothing logged"}`;
+}
+
+function ActivityHeatmap() {
+  const { data } = useQuery({ queryKey: ["activity-calendar"], queryFn: () => api.activityCalendar(180) });
+
+  const { weeks, streak } = useMemo(() => {
+    const days = data || [];
+    // pad so the first day lands on its weekday row (Mon = row 0)
+    const pad = days.length ? (new Date(days[0].date + "T00:00:00").getDay() + 6) % 7 : 0;
+    const cells: (ActivityDay | null)[] = [...Array<null>(pad).fill(null), ...days];
+    const weeks: (ActivityDay | null)[][] = [];
+    for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+    // current streak: consecutive score >= 1, today counts only once it has activity
+    let i = days.length - 1;
+    if (i >= 0 && days[i].score === 0) i -= 1;
+    let streak = 0;
+    while (i >= 0 && days[i].score >= 1) { streak += 1; i -= 1; }
+    return { weeks, streak };
+  }, [data]);
+
+  if (!data) return null;
+  return (
+    <Card>
+      <CardTitle
+        right={
+          <span className="text-xs normal-case tracking-normal text-muted">
+            <span className="font-display text-base font-semibold text-gold">{streak}</span> day streak
+          </span>
+        }
+      >
+        Activity · 6 months
+      </CardTitle>
+      <div className="overflow-x-auto">
+        <div className="flex w-max gap-[3px]">
+          {weeks.map((week, wi) => {
+            const first = week.find((d) => d);
+            const label = first && (() => {
+              const prev = wi > 0 ? weeks[wi - 1].find((d) => d) : null;
+              const m = new Date(first.date + "T00:00:00").getMonth();
+              return !prev || new Date(prev.date + "T00:00:00").getMonth() !== m ? MONTHS[m] : "";
+            })();
+            return (
+              <div key={wi} className="flex flex-col gap-[3px]">
+                <div className="h-3.5 text-[9px] font-medium leading-none text-faint">{label}</div>
+                {week.map((d, di) =>
+                  d ? (
+                    <div key={d.date} title={dayTip(d)} className="h-3 w-3 rounded-[3px]"
+                         style={{ background: HEAT_COLORS[d.score] }} />
+                  ) : (
+                    <div key={`pad-${di}`} className="h-3 w-3" />
+                  )
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div className="mt-2 flex items-center justify-end gap-1 text-[10px] text-faint">
+        Less
+        {HEAT_COLORS.map((c) => (
+          <span key={c} className="h-2.5 w-2.5 rounded-[3px]" style={{ background: c }} />
+        ))}
+        More
+      </div>
+    </Card>
+  );
+}
+
+function StallCard() {
+  const { data } = useQuery({ queryKey: ["stall"], queryFn: api.stallInsight });
+  if (!data?.applies) return null;
+  return (
+    <Card>
+      <CardTitle
+        right={
+          <span className={cx(
+            "rounded-md px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide",
+            data.stalled ? "bg-gold-soft text-gold" : "bg-olive-soft text-olive"
+          )}>
+            {data.stalled ? "Stalled" : "On track"}
+          </span>
+        }
+      >
+        Weight check-in
+      </CardTitle>
+      <div className="mb-3 text-sm text-muted">
+        {data.weekly_rate != null && (
+          <span className="font-display text-lg font-semibold text-ink">
+            {data.weekly_rate > 0 ? "+" : ""}{data.weekly_rate.toFixed(2)} kg/wk
+          </span>
+        )}{" "}
+        over {fmtNumber(data.weeks_tracked, 1)} weeks
+      </div>
+      <ul className="mb-3 grid grid-cols-2 gap-1.5">
+        {data.factors.map((f) => (
+          <li key={f.label} className="flex items-center justify-between rounded-lg bg-surface-2/50 px-2.5 py-1.5 text-xs">
+            <span className="font-medium">{f.label}</span>
+            <span className={f.verdict === "ok" ? "font-semibold text-good" : "font-semibold text-accent"}>
+              {f.value != null ? `${Math.round(f.value * 100)}%` : "—"}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="text-sm leading-relaxed text-muted">{data.suggestion}</p>
+      <Link href="/assistant" className="mt-2 inline-block text-xs font-medium text-accent hover:underline">
+        Discuss with assistant →
+      </Link>
+    </Card>
   );
 }

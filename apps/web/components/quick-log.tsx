@@ -1,11 +1,12 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Droplet, MessageCircle, Moon, Plus, Ruler, Scale, UtensilsCrossed } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Button, Input, Field, Select, Sheet, Spinner, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
+import type { FrequentFood } from "@/lib/types";
 import { fmtNumber } from "@/lib/utils";
 
 type Mode = null | "menu" | "food" | "water" | "weight" | "sleep" | "photo" | "measure";
@@ -242,11 +243,54 @@ function useDone(close: () => void) {
   };
 }
 
+function guessMealType(): string {
+  const h = new Date().getHours();
+  if (h < 10) return "breakfast";
+  if (h < 15) return "lunch";
+  if (h < 17) return "snack";
+  return "dinner";
+}
+
 function FoodQuickLog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const done = useDone(onClose);
+
+  // TRACK D: one-tap logging from saved meals and frequent foods
+  const { data: savedMeals } = useQuery({ queryKey: ["saved-meals"], queryFn: api.savedMeals, enabled: open });
+  const { data: frequent } = useQuery({
+    queryKey: ["foods-frequent"], queryFn: () => api.frequentFoods(8), enabled: open,
+  });
+
+  async function logSaved(id: string, name: string) {
+    setBusy(true);
+    try {
+      await api.logSavedMeal(id, { meal_type: guessMealType() });
+      done(`Logged ${name}`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed", "err");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function logFrequent(f: FrequentFood) {
+    setBusy(true);
+    try {
+      await api.logFood({
+        meal_type: guessMealType(),
+        items: [f.food_id
+          ? { food_id: f.food_id, name: f.name, quantity: 1, unit: "serving" }
+          : { name: f.name, quantity: 1, unit: "serving", calories: f.calories, protein: f.protein, estimated: true }],
+      });
+      done(`Logged ${f.name}`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed", "err");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -265,20 +309,56 @@ function FoodQuickLog({ open, onClose }: { open: boolean; onClose: () => void })
 
   return (
     <Sheet open={open} onClose={onClose} title="Log food">
-      <form onSubmit={submit} className="space-y-4">
-        <Field label="What did you eat?" hint='e.g. "two eggs and 200g rice for lunch" — the assistant structures it'>
-          <Input autoFocus value={text} onChange={(e) => setText(e.target.value)}
-                 placeholder="two eggs, 200g rice and dal for lunch" />
-        </Field>
-        <div className="flex gap-2">
-          <Button type="submit" className="flex-1" disabled={busy || !text.trim()}>
-            {busy ? "Logging…" : "Log with AI"}
-          </Button>
-          <Button type="button" variant="outline" onClick={() => { onClose(); }}>
-            Manual
-          </Button>
-        </div>
-      </form>
+      <div className="space-y-4">
+        {(!!savedMeals?.length || !!frequent?.length) && (
+          <div className="space-y-2.5">
+            {!!savedMeals?.length && (
+              <div>
+                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">Saved meals</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {savedMeals.slice(0, 6).map((m) => (
+                    <button
+                      key={m.id} disabled={busy} onClick={() => logSaved(m.id, m.name)}
+                      className="rounded-full border border-line bg-surface px-3 py-1.5 text-[13px] font-medium transition-colors hover:bg-surface-2"
+                    >
+                      {m.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!!frequent?.length && (
+              <div>
+                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">Frequent</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {frequent.map((f) => (
+                    <button
+                      key={f.food_id || f.name} disabled={busy} onClick={() => logFrequent(f)}
+                      className="rounded-full border border-line bg-surface px-3 py-1.5 text-[13px] font-medium transition-colors hover:bg-surface-2"
+                    >
+                      {f.name} <span className="text-faint">{fmtNumber(f.calories)} kcal</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        <form onSubmit={submit} className="space-y-4">
+          <Field label="What did you eat?" hint='e.g. "two eggs and 200g rice for lunch" — the assistant structures it'>
+            <Input autoFocus value={text} onChange={(e) => setText(e.target.value)}
+                   placeholder="two eggs, 200g rice and dal for lunch" />
+          </Field>
+          <div className="flex gap-2">
+            <Button type="submit" className="flex-1" disabled={busy || !text.trim()}>
+              {busy ? "Logging…" : "Log with AI"}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => { onClose(); }}>
+              Manual
+            </Button>
+          </div>
+        </form>
+      </div>
     </Sheet>
   );
 }

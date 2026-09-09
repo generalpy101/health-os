@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Globe, Plus, ScanBarcode, Search, Trash2, Upload } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TopBar } from "@/components/nav";
 import { BarcodeScanner } from "@/components/barcode-scanner";
 import {
@@ -146,8 +146,15 @@ function LogFoodSheet({ open, onClose, day }: { open: boolean; onClose: () => vo
   const [scanning, setScanning] = useState(false);
   const [picked, setPicked] = useState<{ food: Food; quantity: number }[]>([]);
   const [customName, setCustomName] = useState("");
+  // TRACK D: after a successful log, offer to keep the combo as a saved meal
+  const [justLogged, setJustLogged] = useState<{ id: string; calories: number } | null>(null);
+  const [mealName, setMealName] = useState("");
   const queryClient = useQueryClient();
   const toast = useToast();
+
+  useEffect(() => {
+    if (open) { setJustLogged(null); setMealName(""); }
+  }, [open]);
 
   const { data: results, isFetching } = useQuery({
     queryKey: ["foods", query, online],
@@ -177,11 +184,22 @@ function LogFoodSheet({ open, onClose, day }: { open: boolean; onClose: () => vo
           food_id: p.food.id, name: p.food.name, quantity: p.quantity, unit: p.food.serving_unit,
         })),
       }),
-    onSuccess: () => {
+    onSuccess: (log) => {
       queryClient.invalidateQueries();
       toast("Meal logged");
       setPicked([]);
       setQuery("");
+      setJustLogged({ id: log.id, calories: log.calories });
+    },
+    onError: (e) => toast(e.message, "err"),
+  });
+
+  const saveMeal = useMutation({
+    mutationFn: () => api.createSavedMeal({ name: mealName.trim(), from_log_id: justLogged!.id }),
+    onSuccess: (m) => {
+      queryClient.invalidateQueries({ queryKey: ["saved-meals"] });
+      toast(`Saved "${m.name}" — one tap next time`);
+      setJustLogged(null);
       onClose();
     },
     onError: (e) => toast(e.message, "err"),
@@ -355,9 +373,31 @@ function LogFoodSheet({ open, onClose, day }: { open: boolean; onClose: () => vo
           </div>
         )}
 
-        <Button className="w-full" disabled={picked.length === 0 || save.isPending} onClick={() => save.mutate()}>
-          {save.isPending ? "Saving…" : "Log meal"}
-        </Button>
+        {justLogged ? (
+          <div className="rounded-xl border border-olive/40 bg-olive-soft p-3.5">
+            <div className="text-sm font-semibold text-olive">
+              Logged — {fmtNumber(justLogged.calories)} kcal
+            </div>
+            <div className="mt-2.5 flex gap-2">
+              <Input
+                className="h-9 bg-surface text-sm" placeholder="Save as meal — name it"
+                value={mealName} onChange={(e) => setMealName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && mealName.trim() && saveMeal.mutate()}
+              />
+              <Button size="sm" variant="outline" className="h-9 shrink-0 bg-surface"
+                      disabled={!mealName.trim() || saveMeal.isPending} onClick={() => saveMeal.mutate()}>
+                {saveMeal.isPending ? "Saving…" : "Save as meal"}
+              </Button>
+            </div>
+            <button onClick={onClose} className="mt-2 text-xs font-medium text-faint hover:text-muted">
+              Done — don&rsquo;t save
+            </button>
+          </div>
+        ) : (
+          <Button className="w-full" disabled={picked.length === 0 || save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? "Saving…" : "Log meal"}
+          </Button>
+        )}
       </div>
     </Sheet>
   );

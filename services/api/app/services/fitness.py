@@ -8,6 +8,7 @@ from ..models import Activity, Exercise, User, WorkoutPlan, WorkoutSession
 from ..schemas import ActivityIn, WorkoutIn, WorkoutPlanIn
 from ..utils import metrics
 from ..utils.time import parse_date
+from . import prs as prs_service
 from .common import audit, get_owned
 from .versions import record_version, row_snapshot
 
@@ -22,6 +23,9 @@ async def search_exercises(db: AsyncSession, query: str = "", limit: int = 25) -
 
 async def log_workout(db: AsyncSession, user: User, data: WorkoutIn, source: str = "manual") -> WorkoutSession:
     exercises = [e.model_dump(exclude_none=True) for e in data.exercises]
+    # TRACK D: PRs are computed against all prior sessions BEFORE inserting this one
+    prior = await db.execute(select(WorkoutSession).where(WorkoutSession.user_id == user.id))
+    new_prs = prs_service.detect_new_prs(list(prior.scalars().all()), exercises)
     session = WorkoutSession(
         user_id=user.id,
         date=parse_date(data.date, user.timezone),
@@ -35,8 +39,11 @@ async def log_workout(db: AsyncSession, user: User, data: WorkoutIn, source: str
     db.add(session)
     await audit(db, user.id, "workout_logged", "workout_session", session.id,
                 {"title": session.title, "volume": session.total_volume})
+    if new_prs:
+        await audit(db, user.id, "workout_pr", "workout_session", session.id, {"prs": new_prs})
     await db.commit()
     await db.refresh(session)
+    session.new_prs = new_prs  # transient; surfaced via WorkoutOut.new_prs
     return session
 
 

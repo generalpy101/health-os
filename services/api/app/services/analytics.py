@@ -127,3 +127,56 @@ async def _range_summary(db: AsyncSession, user: User, start: date, end: date) -
         "daily_calories": [{"date": d, "calories": round(c, 1), "protein": round(p, 1)}
                            for d, (c, p) in sorted(nut_by_day.items())],
     }
+
+
+# ---------- TRACK D: activity calendar ----------
+
+def _activity_score(workouts: int, logged_food: bool, habits_done: int, habits_total: int) -> int:
+    """0 none, 1 light (any one), 2 medium (workout, or food + half of habits),
+    3 full (workout + food + all habits). Habit rungs need habits to exist."""
+    half = habits_total > 0 and habits_done * 2 >= habits_total
+    full = habits_total > 0 and habits_done >= habits_total
+    if workouts > 0 and logged_food and full:
+        return 3
+    if workouts > 0 or (logged_food and half):
+        return 2
+    if workouts > 0 or logged_food or habits_done > 0:
+        return 1
+    return 0
+
+
+async def activity_calendar(db: AsyncSession, user: User, days: int = 180) -> list[dict]:
+    """One row per day (ascending) over the trailing window, ending today (user tz)."""
+    end = user_today(user.timezone)
+    start = end - timedelta(days=days - 1)
+    w_q = await db.execute(
+        select(WorkoutSession.date, func.count()).where(
+            WorkoutSession.user_id == user.id, WorkoutSession.date >= start, WorkoutSession.date <= end
+        ).group_by(WorkoutSession.date)
+    )
+    workouts_by_day = dict(w_q.all())
+    f_q = await db.execute(
+        select(FoodLog.date).where(
+            FoodLog.user_id == user.id, FoodLog.date >= start, FoodLog.date <= end
+        ).group_by(FoodLog.date)
+    )
+    food_days = {r[0] for r in f_q.all()}
+    habits = await habits_service.list_habits(db, user)
+    habits_total = len(habits)
+    h_q = await db.execute(
+        select(HabitLog.date, func.count()).where(
+            HabitLog.user_id == user.id, HabitLog.date >= start, HabitLog.date <= end,
+            HabitLog.status == "completed",
+        ).group_by(HabitLog.date)
+    )
+    habits_by_day = dict(h_q.all())
+
+    out = []
+    for i in range(days):
+        d = start + timedelta(days=i)
+        w = workouts_by_day.get(d, 0)
+        h = habits_by_day.get(d, 0)
+        f = d in food_days
+        out.append({"date": d, "workouts": w, "habits_done": h, "habits_total": habits_total,
+                    "logged_food": f, "score": _activity_score(w, f, h, habits_total)})
+    return out

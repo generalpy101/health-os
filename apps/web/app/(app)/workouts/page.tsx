@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { TopBar } from "@/components/nav";
 import { Button, Card, CardTitle, Empty, Field, Input, PageLoading, Segmented, Sheet, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
-import type { WorkoutPlan, WorkoutSet } from "@/lib/types";
+import type { NewPR, Workout, WorkoutPlan, WorkoutSet } from "@/lib/types";
 import { fmtDate, fmtNumber, todayISO } from "@/lib/utils";
 
 interface DraftExercise {
@@ -20,6 +20,9 @@ export default function WorkoutsPage() {
   const [prefill, setPrefill] = useState<{ title: string; exercises: DraftExercise[] } | null>(null);
   const { data: workouts, isLoading } = useQuery({ queryKey: ["workouts"], queryFn: () => api.workouts(40) });
   const { data: range } = useQuery({ queryKey: ["range", 7], queryFn: () => api.rangeSummary(7) });
+  // TRACK D: records strip + PR badges on freshly logged sessions
+  const { data: prs } = useQuery({ queryKey: ["workout-prs"], queryFn: api.workoutPrs });
+  const [prBadges, setPrBadges] = useState<Record<string, NewPR[]>>({});
   const queryClient = useQueryClient();
   const toast = useToast();
 
@@ -28,6 +31,20 @@ export default function WorkoutsPage() {
     onSuccess: () => queryClient.invalidateQueries(),
     onError: (e) => toast(e.message, "err"),
   });
+
+  const onLogged = (w: Workout) => {
+    if (!w.new_prs?.length) return;
+    setPrBadges((m) => ({ ...m, [w.id]: w.new_prs! }));
+    for (const pr of w.new_prs) {
+      toast(pr.kind === "weight"
+        ? `New PR: ${pr.exercise} ${fmtNumber(pr.value, 1)}kg!`
+        : `Volume PR: ${pr.exercise} ${fmtNumber(pr.value)}kg!`);
+    }
+  };
+
+  const recentPrs = [...(prs || [])]
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+    .slice(0, 6);
 
   return (
     <>
@@ -46,6 +63,27 @@ export default function WorkoutsPage() {
           <PlansTab onStartDay={(title, exercises) => { setPrefill({ title, exercises }); setOpen(true); }} />
         ) : (
         <>
+        {recentPrs.length > 0 && (
+          <div>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Records</div>
+            <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+              {recentPrs.map((p) => (
+                <div key={p.exercise} className="min-w-[7.5rem] shrink-0 rounded-xl border border-line bg-surface p-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-xs font-semibold">{p.exercise}</span>
+                    {p.is_recent && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />}
+                  </div>
+                  <div className="mt-0.5 font-display text-xl font-semibold">
+                    {fmtNumber(p.best_weight, 1)}<span className="text-xs font-normal text-muted"> kg</span>
+                  </div>
+                  <div className="text-[10px] text-faint">
+                    ×{fmtNumber(p.reps_at_best)}{p.date ? ` · ${fmtDate(p.date)}` : ""}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Card className="p-4">
             <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">Sessions · 7d</div>
@@ -78,6 +116,11 @@ export default function WorkoutsPage() {
                 }
               >
                 {w.title}
+                {prBadges[w.id]?.length ? (
+                  <span className="ml-2 rounded-md bg-gold-soft px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-gold">
+                    PR{prBadges[w.id].length > 1 ? ` ×${prBadges[w.id].length}` : ""}
+                  </span>
+                ) : null}
               </CardTitle>
               <ul className="divide-y divide-line">
                 {w.exercises.map((ex, i) => (
@@ -97,7 +140,7 @@ export default function WorkoutsPage() {
         </>
         )}
       </main>
-      <LogWorkoutSheet open={open} onClose={() => setOpen(false)} prefill={prefill} />
+      <LogWorkoutSheet open={open} onClose={() => setOpen(false)} prefill={prefill} onLogged={onLogged} />
     </>
   );
 }
@@ -269,7 +312,7 @@ function NewPlanSheet({ open, onClose }: { open: boolean; onClose: () => void })
   );
 }
 
-function LogWorkoutSheet({ open, onClose, prefill }: { open: boolean; onClose: () => void; prefill?: { title: string; exercises: DraftExercise[] } | null }) {
+function LogWorkoutSheet({ open, onClose, prefill, onLogged }: { open: boolean; onClose: () => void; prefill?: { title: string; exercises: DraftExercise[] } | null; onLogged?: (w: Workout) => void }) {
   const [title, setTitle] = useState("");
   const [duration, setDuration] = useState("");
   const [exerciseQuery, setExerciseQuery] = useState("");
@@ -313,6 +356,7 @@ function LogWorkoutSheet({ open, onClose, prefill }: { open: boolean; onClose: (
     onSuccess: (w) => {
       queryClient.invalidateQueries();
       toast(`Logged — ${fmtNumber(w.total_volume)} kg volume`);
+      onLogged?.(w);
       setDraft([]); setTitle(""); setDuration("");
       onClose();
     },
