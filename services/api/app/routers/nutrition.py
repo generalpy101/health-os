@@ -44,9 +44,10 @@ async def log_food(data: FoodLogIn, user: User = Depends(current_user), db: Asyn
 
 
 @router.get("/food-logs", response_model=list[FoodLogOut])
-async def list_food_logs(day: date | None = None, limit: int = 50, offset: int = 0,
+async def list_food_logs(day: date | None = None, start: date | None = None, end: date | None = None,
+                         limit: int = 50, offset: int = 0,
                          user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
-    return await nutrition_service.list_food_logs(db, user, day, limit, offset)
+    return await nutrition_service.list_food_logs(db, user, day, start, end, limit, offset)
 
 
 @router.delete("/food-logs/{log_id}", status_code=204)

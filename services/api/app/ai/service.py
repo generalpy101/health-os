@@ -154,10 +154,13 @@ async def _chat_core(db: AsyncSession, user: User, message: str, conversation_id
     actions: list[AIAction] = []
     reply = ""
     t0 = time.perf_counter()
+    traces: list[dict] = []
 
     async def trace(payload: dict) -> None:
+        ev = {**payload, "elapsed_s": round(time.perf_counter() - t0, 1)}
+        traces.append(ev)
         if on_trace is not None:
-            await on_trace({**payload, "elapsed_s": round(time.perf_counter() - t0, 1)})
+            await on_trace(ev)
 
     # --- CLI session continuity: resume the CLI's own session instead of
     # replaying the whole conversation every call (claude: per-session ids;
@@ -241,12 +244,22 @@ async def _chat_core(db: AsyncSession, user: User, message: str, conversation_id
             # CLI already knows its own reply; next resume only needs the tool results
             cli_state["sent"] = len(messages)
         seen_calls: set[str] = set()
+        logged_meals: set[str] = set()
         for call in resp.tool_calls:
             # guard: skip exact duplicate tool invocations within one turn
             fingerprint = f"{call.name}:{json.dumps(call.arguments, sort_keys=True)}"
             if fingerprint in seen_calls:
                 continue
             seen_calls.add(fingerprint)
+            # one food log per meal per turn — a "corrected" re-log double-counts the user
+            if call.name == "log_food":
+                meal_key = str((call.arguments or {}).get("meal_type", "other"))
+                if meal_key in logged_meals:
+                    messages.append({"role": "tool", "tool_call_id": call.id, "name": call.name,
+                                     "content": json.dumps({"error": "already logged this meal this turn — "
+                                                            "suggest the user edits the existing entry instead"})})
+                    continue
+                logged_meals.add(meal_key)
             await trace({"kind": "tool_start", "tool": call.name})
             tool_started = time.perf_counter()
             latency = int((time.perf_counter() - started) * 1000)
@@ -274,8 +287,17 @@ async def _chat_core(db: AsyncSession, user: User, message: str, conversation_id
                 summary_lines.append(f"{a.tool}: {json.dumps(a.result, default=str)[:200]}")
         reply = "Done.\n" + "\n".join(summary_lines[:6]) if summary_lines else "Sorry, that didn't work."
 
-    db.add(AIMessage(conversation_id=conv.id, user_id=user.id, role="assistant", content=reply,
-                     model=settings.ai_model))
+    db.add(AIMessage(
+        conversation_id=conv.id, user_id=user.id, role="assistant", content=reply,
+        model=settings.ai_model,
+        meta={
+            "trace": traces,
+            "elapsed_s": round(time.perf_counter() - t0, 1),
+            "actions": [{"tool": a.tool, "status": a.status,
+                         "result_summary": json.dumps(_s(a.result), default=str)[:200]}
+                        for a in actions],
+        },
+    ))
     if isinstance(provider, CliProvider) and cli_state is not None:
         from sqlalchemy.orm.attributes import flag_modified
 

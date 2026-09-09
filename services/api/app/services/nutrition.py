@@ -145,12 +145,12 @@ async def _resolve_item(db: AsyncSession, user: User, item: dict) -> dict:
         out["estimated"] = not exact
         if not exact:
             out["confidence"] = 0.6
-        # explicit user correction overrides the database lookup
-        if item.get("estimated") and item.get("calories") is not None:
+        # explicitly stated nutrients (user said so, or AI passed them) beat the lookup
+        if item.get("calories") is not None:
             for key in ("calories", "protein", "carbs", "fat", "fiber"):
                 if item.get(key) is not None:
                     out[key] = float(item[key])
-            out["estimated"] = True
+            out["estimated"] = bool(item.get("estimated", True))
             if item.get("confidence") is not None:
                 out["confidence"] = item["confidence"]
     elif item.get("calories") is not None:
@@ -192,10 +192,15 @@ async def log_food(db: AsyncSession, user: User, data: FoodLogIn, source: str | 
 
 
 async def list_food_logs(db: AsyncSession, user: User, day: date | None = None,
+                         start: date | None = None, end: date | None = None,
                          limit: int = 50, offset: int = 0) -> list[FoodLog]:
     stmt = select(FoodLog).where(FoodLog.user_id == user.id)
     if day:
         stmt = stmt.where(FoodLog.date == day)
+    if start:
+        stmt = stmt.where(FoodLog.date >= start)
+    if end:
+        stmt = stmt.where(FoodLog.date <= end)
     stmt = stmt.order_by(FoodLog.date.desc(), FoodLog.created_at.desc()).limit(min(limit, 200)).offset(offset)
     result = await db.execute(stmt)
     return list(result.scalars().all())

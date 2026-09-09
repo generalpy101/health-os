@@ -170,6 +170,7 @@ const apiBase = {
     }[];
   }) => post<FoodLog>("/food-logs", b),
   foodLogs: (day?: string) => request<FoodLog[]>(`/food-logs${qs({ day })}`),
+  foodLogsRange: (start: string, end: string) => request<FoodLog[]>(`/food-logs${qs({ start, end, limit: 200 })}`),
   deleteFoodLog: (id: string) => del(`/food-logs/${id}`),
   dailyNutrition: (day?: string) => request<NutritionDay>(`/nutrition/daily${qs({ day })}`),
 
@@ -266,7 +267,7 @@ const apiBase = {
     }),
   conversations: () => request<Conversation[]>("/ai/conversations"),
   conversationMessages: (id: string) =>
-    request<{ id: string; role: string; content: string }[]>(`/ai/conversations/${id}/messages`),
+    request<import("./types").StoredChatMessage[]>(`/ai/conversations/${id}/messages`),
   recommendations: () =>
     request<{ id: string; title: string; reason: string | null; priority: string; confidence: number; actions: unknown[] }[]>(
       "/ai/recommendations"),

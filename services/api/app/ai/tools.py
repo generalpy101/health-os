@@ -305,10 +305,11 @@ REGISTRY: dict[str, tuple[dict, Handler, str]] = {
     "create_custom_food": (_schema("create_custom_food", "Create a custom food with nutrients per serving", {
         "name": S, "serving_size": N, "serving_unit": S, "calories": N, "protein": N, "carbs": N, "fat": N},
         ["name", "calories"]), h_create_custom_food, LOW),
-    "log_food": (_schema("log_food", "Log food items for a meal", {
+    "log_food": (_schema("log_food", "Log food items for a meal. Units: g/ml/kg/l/oz/cup/tbsp/tsp, or piece/scoop/serving. When the user states nutrients explicitly (e.g. 'my scoop has 24g protein'), pass calories/protein on that item — explicit values beat database lookup.", {
         "date": S, "meal_type": S, "note": S,
         "items": {"type": "array", "items": {"type": "object", "properties": {
-            "food_id": S, "name": S, "quantity": N, "unit": S}, "required": ["name", "quantity"]}}},
+            "food_id": S, "name": S, "quantity": N, "unit": S,
+            "calories": N, "protein": N, "carbs": N, "fat": N}, "required": ["name", "quantity"]}}},
         ["items"]), h_log_food, LOW),
     "get_daily_nutrition": (_schema("get_daily_nutrition", "Get deterministic nutrition totals for a day", {"date": S}), h_get_daily_nutrition, LOW),
     "log_water": (_schema("log_water", "Log water intake in ml", {"amount_ml": N, "date": S}, ["amount_ml"]), h_log_water, LOW),

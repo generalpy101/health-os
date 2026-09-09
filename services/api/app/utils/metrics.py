@@ -3,16 +3,35 @@
 from datetime import date
 
 
+# common measures → gram/ml equivalent (density-agnostic approximation; good
+# enough for logging, always flagged as estimate upstream when fuzzy)
+UNIT_TO_GRAMS = {
+    "g": 1.0, "gram": 1.0, "grams": 1.0,
+    "ml": 1.0,
+    "kg": 1000.0, "l": 1000.0, "oz": 28.35,
+    "tsp": 5.0, "teaspoon": 5.0,
+    "tbsp": 15.0, "tablespoon": 15.0,
+    "cup": 240.0, "glass": 240.0,
+}
+# units that mean "one serving of this food"
+SERVING_UNITS = {"serving", "servings", "portion", "piece", "pieces", "pcs", "pc",
+                 "scoop", "bar", "bottle", "can", "pack", "packet", "slice", "bowl", "plate"}
+
+
 def scale_nutrients(food: dict, quantity: float, unit: str = "g") -> dict:
     """Scale a food's per-serving nutrients to the requested quantity.
 
-    Foods store nutrients per `serving_size`/`serving_unit`. Quantity given in
-    grams/ml scales linearly; quantity in 'serving' units multiplies directly.
+    Foods store nutrients per `serving_size`/`serving_unit`. Grams/ml scale
+    linearly; kitchen measures convert via UNIT_TO_GRAMS; piece/scoop/etc
+    count as whole servings.
     """
     serving = float(food.get("serving_size") or 100)
-    if unit in ("serving", "servings", "portion", "piece", "pcs"):
+    unit = (unit or "g").lower().strip()
+    if unit in SERVING_UNITS:
         factor = quantity
-    else:  # treat g/ml/oz-ish amounts as linear against serving size
+    elif unit in UNIT_TO_GRAMS:
+        factor = (quantity * UNIT_TO_GRAMS[unit]) / serving if serving else 0.0
+    else:  # unknown unit: assume gram-like (never zero the item silently)
         factor = quantity / serving if serving else 0.0
     return {
         "calories": round(float(food.get("calories", 0)) * factor, 1),

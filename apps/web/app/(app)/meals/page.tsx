@@ -31,6 +31,11 @@ export default function MealsPage() {
     queryKey: ["meal-plans", startISO],
     queryFn: () => api.mealPlans(startISO, endISO),
   });
+  // what you actually ate — shown alongside the plan
+  const { data: weekLogs } = useQuery({
+    queryKey: ["food-logs", startISO],
+    queryFn: () => api.foodLogsRange(startISO, endISO),
+  });
   const { data: recipes } = useQuery({ queryKey: ["recipes", ""], queryFn: () => api.recipes() });
 
   const del = useMutation({
@@ -106,6 +111,7 @@ export default function MealsPage() {
                   <div className="grid gap-1.5 sm:grid-cols-4">
                     {SLOTS.map((meal) => {
                       const slotPlans = dayPlans.filter((p) => p.meal_type === meal);
+                      const loggedForSlot = (weekLogs || []).find((l) => l.date === iso && l.meal_type === meal);
                       return (
                         <div key={meal} className="rounded-xl bg-surface-2/50 p-2.5">
                           <div className="mb-1.5 flex items-center justify-between">
@@ -118,9 +124,16 @@ export default function MealsPage() {
                               <Plus size={13} />
                             </button>
                           </div>
-                          {slotPlans.length === 0 ? (
+                          {slotPlans.length === 0 && !loggedForSlot && (
                             <div className="py-1 text-[11px] text-faint/60">—</div>
-                          ) : (
+                          )}
+                          {loggedForSlot && (
+                            <div className="mb-1 rounded-lg bg-olive-soft/60 px-2 py-1 text-[11px] font-medium text-olive"
+                                 title={loggedForSlot.items.map((i) => i.name).join(", ")}>
+                              ✓ {loggedForSlot.calories > 0 ? `${fmtNumber(loggedForSlot.calories)} kcal logged` : "logged"}
+                            </div>
+                          )}
+                          {slotPlans.length > 0 && (
                             slotPlans.map((p) => (
                               <div key={p.id} className="group mb-1 rounded-lg bg-surface px-2 py-1.5 text-xs">
                                 <div className="flex items-center gap-1">

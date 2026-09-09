@@ -73,8 +73,21 @@ export default function AssistantPage() {
       const msgs = await api.conversationMessages(id);
       setConversationId(id);
       setMessages(
-        msgs.filter((m) => m.role === "user" || m.role === "assistant")
-            .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
+        msgs
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            elapsedS: m.meta?.elapsed_s,
+            trace: m.meta?.trace,
+            actions: (m.meta?.actions || []).map((a, i) => ({
+              id: `stored-${i}`,
+              tool: a.tool,
+              arguments: {},
+              result: a.result_summary ? { summary: a.result_summary } : null,
+              status: a.status,
+            })),
+          }))
       );
       setHistoryOpen(false);
     } catch {

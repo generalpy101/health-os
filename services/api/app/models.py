@@ -331,6 +331,8 @@ class AIMessage(Base):
     content: Mapped[str] = mapped_column(sa.Text, default="")
     model: Mapped[str | None] = mapped_column(sa.String(80), nullable=True)
     token_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    # assistant rows: {"trace": [...], "elapsed_s": float, "actions": [{tool, status}]}
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
 
 

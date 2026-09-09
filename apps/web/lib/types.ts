@@ -270,6 +270,13 @@ export interface ChatMessage {
   trace?: TraceEvent[];
 }
 
+export interface StoredChatMessage {
+  id: string;
+  role: string;
+  content: string;
+  meta?: { trace?: TraceEvent[]; elapsed_s?: number; actions?: { tool: string; status: string; result_summary?: string }[] };
+}
+
 export interface Conversation {
   id: string;
   title: string;

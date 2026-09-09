@@ -559,6 +559,7 @@ class MessageOut(ORMModel):
     id: UUID
     role: str
     content: str
+    meta: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
 
