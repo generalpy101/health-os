@@ -56,6 +56,17 @@ async def list_water(db: AsyncSession, user: User, day: date) -> list[WaterLog]:
     return await _water_for_day(db, user, day)
 
 
+async def update_water(db: AsyncSession, user: User, log_id: UUID, amount_ml: float) -> WaterLog:
+    log = await get_owned(db, WaterLog, log_id, user)
+    if amount_ml <= 0:
+        from fastapi import HTTPException
+        raise HTTPException(422, "amount_ml must be > 0")
+    log.amount_ml = amount_ml
+    await db.commit()
+    await db.refresh(log)
+    return log
+
+
 async def delete_water(db: AsyncSession, user: User, log_id: UUID) -> None:
     log = await get_owned(db, WaterLog, log_id, user)
     await db.delete(log)
@@ -91,6 +102,30 @@ async def list_sleep(db: AsyncSession, user: User, start: date | None = None, en
         stmt = stmt.where(SleepLog.date <= end)
     result = await db.execute(stmt.order_by(SleepLog.date.desc()).limit(min(limit, 200)))
     return list(result.scalars().all())
+
+
+async def update_sleep(db: AsyncSession, user: User, log_id: UUID, data: SleepIn) -> SleepLog:
+    log = await get_owned(db, SleepLog, log_id, user)
+    duration = int((data.sleep_end - data.sleep_start).total_seconds() / 60)
+    if duration <= 0:
+        from fastapi import HTTPException
+        raise HTTPException(422, "sleep_end must be after sleep_start")
+    log.sleep_start = data.sleep_start
+    log.sleep_end = data.sleep_end
+    log.duration_min = duration
+    if data.date is not None:
+        log.date = parse_date(data.date, user.timezone)
+    else:
+        log.date = data.sleep_end.date()
+    if data.quality is not None:
+        log.quality = data.quality
+    if data.interruptions is not None:
+        log.interruptions = data.interruptions
+    if data.notes is not None:
+        log.notes = data.notes
+    await db.commit()
+    await db.refresh(log)
+    return log
 
 
 async def delete_sleep(db: AsyncSession, user: User, log_id: UUID) -> None:
@@ -136,6 +171,20 @@ async def list_measurements(db: AsyncSession, user: User, type_: str | None = No
         stmt.order_by(Measurement.date.asc(), Measurement.created_at.asc()).limit(min(limit, 500)).offset(offset)
     )
     return list(result.scalars().all())
+
+
+async def update_measurement(db: AsyncSession, user: User, m_id: UUID, data: MeasurementIn) -> Measurement:
+    m = await get_owned(db, Measurement, m_id, user)
+    m.type = data.type
+    m.value = data.value
+    m.unit = data.unit
+    if data.date is not None:
+        m.date = parse_date(data.date, user.timezone)
+    if data.notes is not None:
+        m.notes = data.notes
+    await db.commit()
+    await db.refresh(m)
+    return m
 
 
 async def delete_measurement(db: AsyncSession, user: User, m_id: UUID) -> None:

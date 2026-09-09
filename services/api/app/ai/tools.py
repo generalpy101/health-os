@@ -286,6 +286,64 @@ async def h_delete_recipe(db, user, args):
     return {"deleted": True}
 
 
+async def h_update_food_log(db, user, args):
+    from ..schemas import FoodLogItemIn
+    items = [FoodLogItemIn(**i) for i in args["items"]] if args.get("items") else None
+    log = await nutrition.update_food_log(db, user, args["log_id"], meal_type=args.get("meal_type"),
+                                          note=args.get("note"), time=args.get("time"), items=items)
+    return {"updated": _obj(log, ["id", "date", "meal_type", "calories", "protein"])}
+
+
+async def h_delete_food_log(db, user, args):
+    await nutrition.delete_food_log(db, user, args["log_id"])
+    return {"deleted": True}
+
+
+async def h_update_workout(db, user, args):
+    w = await fitness.update_workout(db, user, args.pop("session_id"), WorkoutIn(**args))
+    return {"updated": _obj(w, ["id", "title", "date", "total_volume"])}
+
+
+async def h_delete_workout(db, user, args):
+    await fitness.delete_workout(db, user, args["session_id"])
+    return {"deleted": True}
+
+
+async def h_update_sleep(db, user, args):
+    s = await health.update_sleep(db, user, args.pop("log_id"), SleepIn(**args))
+    return {"updated": _obj(s, ["id", "date", "duration_min"])}
+
+
+async def h_delete_sleep(db, user, args):
+    await health.delete_sleep(db, user, args["log_id"])
+    return {"deleted": True}
+
+
+async def h_update_water(db, user, args):
+    w = await health.update_water(db, user, args["log_id"], float(args["amount_ml"]))
+    return {"updated": _obj(w, ["id", "date", "amount_ml"])}
+
+
+async def h_delete_water(db, user, args):
+    await health.delete_water(db, user, args["log_id"])
+    return {"deleted": True}
+
+
+async def h_update_measurement(db, user, args):
+    m = await health.update_measurement(db, user, args.pop("measurement_id"), MeasurementIn(**args))
+    return {"updated": _obj(m, ["id", "type", "value", "unit", "date"])}
+
+
+async def h_delete_measurement(db, user, args):
+    await health.delete_measurement(db, user, args["measurement_id"])
+    return {"deleted": True}
+
+
+async def h_delete_habit(db, user, args):
+    await habits.delete_habit(db, user, args["habit_id"])  # archives, keeps history
+    return {"archived": True}
+
+
 async def h_suggest_meal(db, user, args):
     from ..services import suggest as suggest_service
     return await suggest_service.meal_suggestions(db, user)
@@ -384,6 +442,29 @@ REGISTRY: dict[str, tuple[dict, Handler, str]] = {
             "food_id": S, "name": S, "quantity": N, "unit": S}, "required": ["name", "quantity"]}}},
         ["recipe_id", "name", "ingredients"]), h_update_recipe, MEDIUM),
     "delete_recipe": (_schema("delete_recipe", "Delete a recipe", {"recipe_id": S}, ["recipe_id"]), h_delete_recipe, HIGH),
+    "update_food_log": (_schema("update_food_log", "Edit a logged meal in place (time, meal, or corrected items) — never delete+recreate to fix numbers", {
+        "log_id": S, "time": S, "meal_type": S, "note": S,
+        "items": {"type": "array", "items": {"type": "object", "properties": {
+            "food_id": S, "name": S, "quantity": N, "unit": S, "calories": N, "protein": N, "carbs": N, "fat": N},
+            "required": ["name", "quantity"]}}}, ["log_id"]), h_update_food_log, MEDIUM),
+    "delete_food_log": (_schema("delete_food_log", "Delete a food log entry", {"log_id": S}, ["log_id"]), h_delete_food_log, MEDIUM),
+    "update_workout": (_schema("update_workout", "Edit a logged workout in place (title, duration, sets)", {
+        "session_id": S, "title": S, "duration_min": N, "date": S, "notes": S,
+        "exercises": {"type": "array", "items": {"type": "object", "properties": {
+            "name": S, "sets": {"type": "array", "items": {"type": "object", "properties": {
+                "weight": N, "reps": N, "rpe": N, "duration_s": N, "distance_m": N}}}}, "required": ["name"]}}},
+        ["session_id"]), h_update_workout, MEDIUM),
+    "delete_workout": (_schema("delete_workout", "Delete a logged workout", {"session_id": S}, ["session_id"]), h_delete_workout, MEDIUM),
+    "update_sleep": (_schema("update_sleep", "Edit a sleep log (times, quality)", {
+        "log_id": S, "sleep_start": S, "sleep_end": S, "quality": N, "notes": S}, ["log_id", "sleep_start", "sleep_end"]), h_update_sleep, MEDIUM),
+    "delete_sleep": (_schema("delete_sleep", "Delete a sleep log", {"log_id": S}, ["log_id"]), h_delete_sleep, MEDIUM),
+    "update_water": (_schema("update_water", "Change a water log amount", {"log_id": S, "amount_ml": N}, ["log_id", "amount_ml"]), h_update_water, LOW),
+    "delete_water": (_schema("delete_water", "Delete a water log", {"log_id": S}, ["log_id"]), h_delete_water, LOW),
+    "update_measurement": (_schema("update_measurement", "Correct a measurement", {
+        "measurement_id": S, "type": S, "value": N, "unit": S, "date": S},
+        ["measurement_id", "type", "value"]), h_update_measurement, MEDIUM),
+    "delete_measurement": (_schema("delete_measurement", "Delete a measurement", {"measurement_id": S}, ["measurement_id"]), h_delete_measurement, MEDIUM),
+    "delete_habit": (_schema("delete_habit", "Archive a habit (keeps its history)", {"habit_id": S}, ["habit_id"]), h_delete_habit, MEDIUM),
 }
 
 

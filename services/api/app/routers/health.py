@@ -34,6 +34,12 @@ async def get_water(day: str | None = None, user: User = Depends(current_user), 
     return {"date": d, "total_ml": total, "logs": logs}
 
 
+@router.patch("/water/{log_id}", response_model=WaterOut)
+async def update_water(log_id: UUID, data: WaterIn, user: User = Depends(current_user),
+                       db: AsyncSession = Depends(get_db)):
+    return await health_service.update_water(db, user, log_id, data.amount_ml)
+
+
 @router.delete("/water/{log_id}", status_code=204)
 async def delete_water(log_id: UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     await health_service.delete_water(db, user, log_id)
@@ -50,6 +56,12 @@ async def list_sleep(days: int = Query(default=30, le=365), user: User = Depends
                      db: AsyncSession = Depends(get_db)):
     start, end = date_range(days, user.timezone)
     return await health_service.list_sleep(db, user, start, end)
+
+
+@router.patch("/sleep/{log_id}", response_model=SleepOut)
+async def update_sleep(log_id: UUID, data: SleepIn, user: User = Depends(current_user),
+                       db: AsyncSession = Depends(get_db)):
+    return await health_service.update_sleep(db, user, log_id, data)
 
 
 @router.delete("/sleep/{log_id}", status_code=204)
@@ -69,6 +81,12 @@ async def list_measurements(type: str | None = None, days: int = Query(default=9
                             user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     start, end = date_range(days, user.timezone)
     return await health_service.list_measurements(db, user, type, start, end)
+
+
+@router.patch("/measurements/{m_id}", response_model=MeasurementOut)
+async def update_measurement(m_id: UUID, data: MeasurementIn, user: User = Depends(current_user),
+                             db: AsyncSession = Depends(get_db)):
+    return await health_service.update_measurement(db, user, m_id, data)
 
 
 @router.delete("/measurements/{m_id}", status_code=204)

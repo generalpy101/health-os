@@ -31,6 +31,12 @@ async def list_workouts(start: date | None = None, end: date | None = None, limi
     return await fitness_service.list_workouts(db, user, start, end, limit, offset)
 
 
+@router.patch("/workout-sessions/{session_id}", response_model=WorkoutOut)
+async def update_workout(session_id: UUID, data: WorkoutIn, user: User = Depends(current_user),
+                         db: AsyncSession = Depends(get_db)):
+    return await fitness_service.update_workout(db, user, session_id, data)
+
+
 @router.delete("/workout-sessions/{session_id}", status_code=204)
 async def delete_workout(session_id: UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     await fitness_service.delete_workout(db, user, session_id)
@@ -68,6 +74,12 @@ async def log_activity(data: ActivityIn, user: User = Depends(current_user), db:
 async def list_activities(start: date | None = None, end: date | None = None, limit: int = 50,
                           user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     return await fitness_service.list_activities(db, user, start, end, limit)
+
+
+@router.patch("/activities/{activity_id}", response_model=ActivityOut)
+async def update_activity(activity_id: UUID, data: ActivityIn, user: User = Depends(current_user),
+                          db: AsyncSession = Depends(get_db)):
+    return await fitness_service.update_activity(db, user, activity_id, data)
 
 
 @router.delete("/activities/{activity_id}", status_code=204)

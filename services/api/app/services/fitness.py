@@ -60,6 +60,23 @@ async def list_workouts(db: AsyncSession, user: User, start: date | None = None,
     return list(result.scalars().all())
 
 
+async def update_workout(db: AsyncSession, user: User, session_id: UUID, data: WorkoutIn) -> WorkoutSession:
+    session = await get_owned(db, WorkoutSession, session_id, user)
+    exercises = [e.model_dump(exclude_none=True) for e in data.exercises]
+    session.title = data.title
+    session.duration_min = data.duration_min
+    session.exercises = exercises
+    session.total_volume = metrics.workout_volume(exercises)
+    if data.date is not None:
+        session.date = parse_date(data.date, user.timezone)
+    if data.notes is not None:
+        session.notes = data.notes
+    await audit(db, user.id, "workout_updated", "workout_session", session.id, {"title": session.title})
+    await db.commit()
+    await db.refresh(session)
+    return session
+
+
 async def delete_workout(db: AsyncSession, user: User, session_id: UUID) -> None:
     session = await get_owned(db, WorkoutSession, session_id, user)
     await db.delete(session)
@@ -132,6 +149,17 @@ async def list_activities(db: AsyncSession, user: User, start: date | None = Non
         stmt = stmt.where(Activity.date <= end)
     result = await db.execute(stmt.order_by(Activity.date.desc()).limit(min(limit, 200)))
     return list(result.scalars().all())
+
+
+async def update_activity(db: AsyncSession, user: User, activity_id: UUID, data: ActivityIn) -> Activity:
+    activity = await get_owned(db, Activity, activity_id, user)
+    for key, value in data.model_dump(exclude={"date"}, exclude_none=True).items():
+        setattr(activity, key, value)
+    if data.date is not None:
+        activity.date = parse_date(data.date, user.timezone)
+    await db.commit()
+    await db.refresh(activity)
+    return activity
 
 
 async def delete_activity(db: AsyncSession, user: User, activity_id: UUID) -> None:
