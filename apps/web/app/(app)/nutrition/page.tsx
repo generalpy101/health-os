@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Globe, Plus, ScanBarcode, Search, Trash2, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
 import { TopBar } from "@/components/nav";
+import { AddFoodSheet } from "@/components/add-food";
 import { BarcodeScanner } from "@/components/barcode-scanner";
 import {
   Button, Card, CardTitle, Empty, Field, Input, PageLoading, Select, Sheet, Spinner, useToast,
@@ -18,6 +19,7 @@ export default function NutritionPage() {
   const [logOpen, setLogOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [editItem, setEditItem] = useState<{ log: FoodLog; index: number } | null>(null);
+  const [foodOpen, setFoodOpen] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ["nutrition", day],
     queryFn: () => api.dailyNutrition(day),
@@ -41,6 +43,9 @@ export default function NutritionPage() {
           <div className="flex items-center gap-1.5 sm:gap-2">
             <Input type="date" value={day} onChange={(e) => setDay(e.target.value)}
                    className="h-9 w-[7.6rem] px-2 text-xs sm:w-auto sm:px-3.5 sm:text-sm" />
+            <Button size="sm" variant="outline" onClick={() => setFoodOpen(true)} aria-label="Add food from label">
+              <Plus size={15} /><span className="hidden sm:inline">Food</span>
+            </Button>
             <Button size="sm" onClick={() => setLogOpen(true)} aria-label="Log food">
               <Plus size={15} /><span className="hidden sm:inline">Log food</span>
             </Button>
@@ -135,6 +140,7 @@ export default function NutritionPage() {
       </main>
       <LogFoodSheet open={logOpen} onClose={() => setLogOpen(false)} day={day} />
       <EditItemSheet target={editItem} onClose={() => setEditItem(null)} />
+      <AddFoodSheet open={foodOpen} onClose={() => setFoodOpen(false)} />
       <ImportSheet open={importOpen} onClose={() => setImportOpen(false)} />
     </>
   );
@@ -148,6 +154,7 @@ function EditItemSheet({ target, onClose }: { target: { log: FoodLog; index: num
   const [quantity, setQuantity] = useState("");
   const [calories, setCalories] = useState("");
   const [protein, setProtein] = useState("");
+  const [saveAsFood, setSaveAsFood] = useState(false);
 
   useEffect(() => {
     if (item) {
@@ -158,13 +165,24 @@ function EditItemSheet({ target, onClose }: { target: { log: FoodLog; index: num
   }, [target]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = useMutation({
-    mutationFn: () => {
-      if (!target) return Promise.reject(new Error("nothing to save"));
+    mutationFn: async () => {
+      if (!target || !item) return Promise.reject(new Error("nothing to save"));
+      let foodId: string | undefined = item.food_id || undefined;
+      if (saveAsFood) {
+        // turn this correction into a reusable food (serving = what you logged)
+        const created = await api.createFood({
+          name: item.name, serving_size: parseFloat(quantity) || item.quantity,
+          serving_unit: item.unit === "g" || item.unit === "ml" ? item.unit : "serving",
+          calories: parseFloat(calories) || 0, protein: parseFloat(protein) || 0,
+          source: "custom",
+        });
+        foodId = created.id;
+      }
       const items = target.log.items.map((it, i) => ({
         name: it.name,
         quantity: i === target.index ? parseFloat(quantity) || it.quantity : it.quantity,
         unit: it.unit,
-        food_id: it.food_id || undefined,
+        food_id: i === target.index ? (foodId ?? it.food_id ?? undefined) : (it.food_id || undefined),
         ...(i === target.index
           ? { calories: parseFloat(calories) || 0, protein: parseFloat(protein) || 0, estimated: false }
           : {}),
@@ -173,7 +191,7 @@ function EditItemSheet({ target, onClose }: { target: { log: FoodLog; index: num
     },
     onSuccess: () => {
       queryClient.invalidateQueries();
-      toast("Corrected — totals recalculated");
+      toast(saveAsFood ? "Corrected + saved as your food" : "Corrected — totals recalculated");
       onClose();
     },
     onError: (e) => toast(e.message, "err"),
@@ -198,6 +216,14 @@ function EditItemSheet({ target, onClose }: { target: { log: FoodLog; index: num
             <Input inputMode="decimal" value={protein} onChange={(e) => setProtein(e.target.value)} />
           </Field>
         </div>
+        <label className="flex items-start gap-2.5 rounded-xl border border-line p-3 text-[13px] text-muted">
+          <input type="checkbox" checked={saveAsFood} onChange={(e) => setSaveAsFood(e.target.checked)}
+                 className="mt-0.5 accent-[var(--accent)]" />
+          <span>
+            <span className="font-semibold text-ink">Save as my food</span> — these numbers become the
+            reference for “{item.name}” from now on (beats the generic database).
+          </span>
+        </label>
         <Button type="submit" className="w-full" disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save correction"}
         </Button>
@@ -218,6 +244,8 @@ function LogFoodSheet({ open, onClose, day }: { open: boolean; onClose: () => vo
   // TRACK D: after a successful log, offer to keep the combo as a saved meal
   const [justLogged, setJustLogged] = useState<{ id: string; calories: number } | null>(null);
   const [mealName, setMealName] = useState("");
+  const [labelOpen, setLabelOpen] = useState(false);
+  const [labelPrefill, setLabelPrefill] = useState<{ barcode?: string } | null>(null);
   const queryClient = useQueryClient();
   const toast = useToast();
 
@@ -241,7 +269,15 @@ function LogFoodSheet({ open, onClose, day }: { open: boolean; onClose: () => vo
       setScanning(false);
       setBarcodeOpen(false);
     },
-    onError: (e) => toast(e.message === "not found" ? "Barcode not found — try online search" : e.message, "err"),
+    onError: (e) => {
+      if (e.message === "not found") {
+        // barcode unknown everywhere — offer to register the label for it
+        setLabelPrefill({ barcode });
+        setLabelOpen(true);
+      } else {
+        toast(e.message, "err");
+      }
+    },
   });
 
   const save = useMutation({
@@ -468,6 +504,7 @@ function LogFoodSheet({ open, onClose, day }: { open: boolean; onClose: () => vo
           </Button>
         )}
       </div>
+      <AddFoodSheet open={labelOpen} onClose={() => setLabelOpen(false)} prefill={labelPrefill} />
     </Sheet>
   );
 }

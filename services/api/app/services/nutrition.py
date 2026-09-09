@@ -113,16 +113,17 @@ async def _resolve_item(db: AsyncSession, user: User, item: dict) -> dict:
     if food is None:
         name_l = out["name"].lower().strip()
         singular = name_l.rstrip("s")
-        matches = await search_foods(db, user, out["name"], limit=8)
+        # wide net — the relevance ranker below needs the whole pool, not 8 rows
+        matches = await search_foods(db, user, out["name"], limit=50)
         if not matches and singular != name_l:
-            matches = await search_foods(db, user, singular, limit=8)
+            matches = await search_foods(db, user, singular, limit=50)
         if not matches:
             # word-reduction: "chicken cutlets" → "chicken"; "rolled oats" → "oats"
             words = [w for w in re.split(r"\s+", name_l) if len(w) > 2]
             subs = [" ".join(words[:n]) for n in range(len(words) - 1, 0, -1)] + \
                    [" ".join(words[n:]) for n in range(1, len(words))]
             for sub in subs:
-                matches = await search_foods(db, user, sub, limit=8)
+                matches = await search_foods(db, user, sub, limit=50)
                 if matches:
                     break
         exact_match = next(
