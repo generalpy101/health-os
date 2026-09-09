@@ -289,3 +289,19 @@ export interface OnboardingProposal {
   memories: { type: string; key: string; value: string }[];
   defaults_suggested?: { calories: number; protein_g: number; water_ml: number };
 }
+
+// === TRACK B ===
+
+export interface Review {
+  start: string;
+  end: string;
+  data: RangeSummary;
+  narrative: string | null;
+  generated_at: string;
+}
+
+export interface ChatStreamHandlers {
+  onDelta?: (text: string) => void;
+  onActions?: (actions: ChatAction[]) => void;
+  onDone?: (conversationId: string, reply: string) => void;
+}

@@ -21,6 +21,9 @@ class Settings(BaseSettings):
 
     seed_on_startup: bool = True
 
+    worker_enabled: bool = True  # in-process background worker (tests disable it)
+    vapid_sub: str = "mailto:admin@healthos.local"  # VAPID contact claim for web push
+
 
 @lru_cache
 def get_settings() -> Settings:

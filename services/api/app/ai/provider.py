@@ -6,12 +6,15 @@ import asyncio
 import json
 import re
 import tempfile
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
 from ..config import get_settings
+
+OnDelta = Callable[[str], Awaitable[None]]
 
 
 @dataclass
@@ -34,6 +37,15 @@ class AIProvider:
 
     async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> ProviderResponse:
         raise NotImplementedError
+
+    async def stream(self, messages: list[dict], tools: list[dict] | None = None,
+                     on_delta: OnDelta | None = None) -> ProviderResponse:
+        """Streaming default: providers without a streaming mode emit the full
+        reply as a single delta (mock/cli rely on this)."""
+        resp = await self.complete(messages, tools=tools)
+        if resp.text and on_delta is not None:
+            await on_delta(resp.text)
+        return resp
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +414,63 @@ class OpenAICompatibleProvider(AIProvider):
             model=data.get("model", self.model),
             usage=data.get("usage") or {},
         )
+
+    async def stream(self, messages: list[dict], tools: list[dict] | None = None,
+                     on_delta: OnDelta | None = None) -> ProviderResponse:
+        """True streaming via the provider's SSE (`stream: true`). Text deltas are
+        forwarded as they arrive; tool_call fragments are accumulated and returned
+        in the final ProviderResponse."""
+        payload: dict[str, Any] = {"model": self.model, "messages": messages, "stream": True}
+        if tools:
+            payload["tools"] = [
+                {"type": "function", "function": {"name": t["name"], "description": t["description"],
+                                                  "parameters": t["input_schema"]}}
+                for t in tools
+            ]
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        text_parts: list[str] = []
+        tool_acc: dict[int, dict[str, str]] = {}
+        model = self.model
+        async with httpx.AsyncClient(timeout=90) as client:
+            async with client.stream("POST", f"{self.base_url}/chat/completions",
+                                     json=payload, headers=headers) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    model = chunk.get("model", model)
+                    for choice in chunk.get("choices") or []:
+                        delta = choice.get("delta") or {}
+                        content = delta.get("content")
+                        if content:
+                            text_parts.append(content)
+                            if on_delta is not None:
+                                await on_delta(content)
+                        for tc in delta.get("tool_calls") or []:
+                            slot = tool_acc.setdefault(tc.get("index", 0),
+                                                       {"id": "", "name": "", "arguments": ""})
+                            if tc.get("id"):
+                                slot["id"] = tc["id"]
+                            fn = tc.get("function") or {}
+                            if fn.get("name"):
+                                slot["name"] += fn["name"]
+                            if fn.get("arguments"):
+                                slot["arguments"] += fn["arguments"]
+        calls = []
+        for i, slot in enumerate(tool_acc.values()):
+            try:
+                args = json.loads(slot["arguments"] or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            calls.append(ToolCall(id=slot["id"] or f"call-{i}", name=slot["name"], arguments=args))
+        return ProviderResponse(text="".join(text_parts), tool_calls=calls, model=model)
 
 
 # ---------------------------------------------------------------------------

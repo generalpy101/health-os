@@ -1,7 +1,7 @@
 import type {
-  ChatAction, Conversation, DailySummary, Food, FoodLog, Goal, Habit, HabitProgress,
-  Measurement, NutritionDay, OnboardingProposal, Profile, RangeSummary, Recipe, ScheduleEvent,
-  SleepLog, Target, User, WeightTrend, Workout,
+  ChatAction, ChatStreamHandlers, Conversation, DailySummary, Food, FoodLog, Goal, Habit,
+  HabitProgress, Measurement, NutritionDay, OnboardingProposal, Profile, RangeSummary, Recipe,
+  Review, ScheduleEvent, SleepLog, Target, User, WeightTrend, Workout,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -125,7 +125,7 @@ const del = (path: string) => request<void>(path, { method: "DELETE" });
 
 // ---------- typed API ----------
 
-export const api = {
+const apiBase = {
   // auth / user
   signup: (b: { email: string; password: string; name: string }) => post<User>("/auth/signup", b),
   login: (b: { email: string; password: string }) => post<User>("/auth/login", b),
@@ -280,3 +280,76 @@ export const api = {
     request<{ models: string[]; detected: boolean; source: string; default?: string }>(
       `/ai/providers/${providerId}/models${qs({ base_url: baseUrl })}`),
 };
+
+// === TRACK B ===
+
+/** POST + parse a server-sent-events stream (event:/data: frames). */
+async function postSSE(path: string, body: unknown, handlers: ChatStreamHandlers): Promise<void> {
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    throw new ApiError(0, "You are offline. This action needs a connection.");
+  }
+  let res: Response;
+  try {
+    res = await fetch(BASE + path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError(0, "Network error. Check your connection.");
+  }
+  if (!res.ok || !res.body) {
+    let detail = `Request failed (${res.status})`;
+    try {
+      const data = await res.json();
+      if (data && typeof data === "object" && "detail" in data) detail = String(data.detail);
+    } catch { /* keep generic */ }
+    throw new ApiError(res.status, detail);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let cut: number;
+    while ((cut = buf.indexOf("\n\n")) !== -1) {
+      const frame = buf.slice(0, cut);
+      buf = buf.slice(cut + 2);
+      let event = "message";
+      const dataLines: string[] = [];
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+      }
+      if (!dataLines.length) continue;
+      const data = JSON.parse(dataLines.join("\n"));
+      if (event === "delta") handlers.onDelta?.(data.text ?? "");
+      else if (event === "actions") handlers.onActions?.(data.actions ?? []);
+      else if (event === "done") handlers.onDone?.(data.conversation_id, data.reply);
+      else if (event === "error") throw new ApiError(500, data.message || "Stream failed");
+    }
+  }
+}
+
+const apiTrackB = {
+  // ai reviews
+  reviewWeekly: () => request<Review>("/reviews/weekly"),
+  reviewMonthly: () => request<Review>("/reviews/monthly"),
+  regenerateReview: (kind: "weekly" | "monthly") => post<Review>(`/reviews/${kind}/regenerate`, {}),
+
+  // streaming chat
+  chatStream: (message: string, conversationId: string | undefined, handlers: ChatStreamHandlers) =>
+    postSSE("/ai/chat/stream", { message, conversation_id: conversationId }, handlers),
+
+  // web push
+  pushVapidKey: () => request<{ publicKey: string }>("/push/vapid-key"),
+  pushSubscribe: (b: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+    post<{ ok: boolean }>("/push/subscribe", b),
+  pushUnsubscribe: (endpoint: string) =>
+    request<void>("/push/subscribe", { method: "DELETE", body: JSON.stringify({ endpoint }) }),
+  pushTest: () => post<{ sent: number }>("/push/test", {}),
+};
+
+export const api = Object.assign(apiBase, apiTrackB);

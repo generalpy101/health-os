@@ -2,7 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity, Bell, CalendarDays, CalendarRange, ChefHat, Dumbbell, Home, MessageCircle, Settings, TrendingUp,
+  Activity, Bell, CalendarDays, CalendarRange, ChefHat, Dumbbell, Home, MessageCircle, ScrollText, Settings,
+  TrendingUp,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -20,6 +21,7 @@ const NAV = [
   { href: "/schedule", label: "Planner", icon: CalendarDays },
   { href: "/progress", label: "Progress", icon: TrendingUp },
   { href: "/assistant", label: "Assistant", icon: MessageCircle },
+  { href: "/reviews", label: "Reviews", icon: ScrollText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

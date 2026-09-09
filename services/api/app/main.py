@@ -8,8 +8,9 @@ from .db import SessionLocal, engine
 from .migrate import run_migrations
 from .ratelimit import RateLimitMiddleware
 from .routers import (ai, analytics, auth, fitness, goals, health, notifications, nutrition,
-                      photos, recipes, schedule, users)
+                      photos, push, recipes, reviews, schedule, users)  # TRACK B: push, reviews
 from .seed import seed
+from .worker import start_worker, stop_worker
 
 
 @asynccontextmanager
@@ -19,7 +20,11 @@ async def lifespan(app: FastAPI):
     if settings.seed_on_startup:
         async with SessionLocal() as db:
             await seed(db)
-    yield
+    worker = start_worker()
+    try:
+        yield
+    finally:
+        await stop_worker(worker)
     await engine.dispose()
 
 
@@ -46,6 +51,9 @@ app.include_router(analytics.router, prefix=API)
 app.include_router(ai.router, prefix=API)
 app.include_router(photos.router, prefix=API)
 app.include_router(notifications.router, prefix=API)
+# TRACK B
+app.include_router(reviews.router, prefix=API)
+app.include_router(push.router, prefix=API)
 
 app.add_middleware(RateLimitMiddleware)
 
