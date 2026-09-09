@@ -138,15 +138,17 @@ function WidgetRenderer({
             <div className="flex-1 space-y-2.5">
               {[
                 { l: "Protein", v: summary.nutrition.protein, t: t.protein, c: "var(--olive)" },
-                { l: "Carbs", v: summary.nutrition.carbs, t: undefined, c: "var(--gold)" },
-                { l: "Fat", v: summary.nutrition.fat, t: undefined, c: "var(--berry)" },
+                { l: "Carbs", v: summary.nutrition.carbs, t: t.carbs, c: "var(--gold)" },
+                { l: "Fat", v: summary.nutrition.fat, t: t.fat, c: "var(--berry)" },
               ].map((m) => (
                 <div key={m.l}>
                   <div className="mb-1 flex justify-between text-xs">
                     <span className="font-medium text-muted">{m.l}</span>
                     <span className="font-semibold">{fmtNumber(m.v)}{m.t ? ` / ${m.t}` : ""}g</span>
                   </div>
-                  <ProgressBar value={m.t ? m.v / m.t : 0.4} color={m.c} />
+                  {m.t != null
+                    ? <ProgressBar value={m.v / m.t} color={m.c} />
+                    : <div className="text-[10px] text-faint">no target set</div>}
                 </div>
               ))}
             </div>

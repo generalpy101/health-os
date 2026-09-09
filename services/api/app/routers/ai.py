@@ -144,6 +144,29 @@ async def onboarding_parse(data: OnboardingParseIn, user: User = Depends(current
 @router.post("/onboarding/commit")
 async def onboarding_commit(data: OnboardingCommitIn, user: User = Depends(current_user),
                             db: AsyncSession = Depends(get_db)):
+    from ..models import Goal, ScheduleEvent, Target
+
+    replaced = {"goals": 0, "targets": 0, "events": 0}
+    if data.replace:
+        # redo flow: retire the current setup before writing the new one
+        old_goals = (await db.execute(
+            select(Goal).where(Goal.user_id == user.id, Goal.status == "active"))).scalars().all()
+        for g in old_goals:
+            g.status = "archived"
+            replaced["goals"] += 1
+        old_targets = (await db.execute(
+            select(Target).where(Target.user_id == user.id, Target.active.is_(True)))).scalars().all()
+        for t in old_targets:
+            t.active = False  # versioned by targets history via update path only when replaced per-key
+            replaced["targets"] += 1
+        old_events = (await db.execute(
+            select(ScheduleEvent).where(ScheduleEvent.user_id == user.id))).scalars().all()
+        for e in old_events:
+            if (e.meta or {}).get("origin") == "onboarding":
+                await db.delete(e)
+                replaced["events"] += 1
+        await db.flush()
+
     profile = (await db.execute(select(UserProfile).where(UserProfile.user_id == user.id))).scalar_one_or_none()
     if profile is None:
         profile = UserProfile(user_id=user.id)
@@ -165,6 +188,7 @@ async def onboarding_commit(data: OnboardingCommitIn, user: User = Depends(curre
         created["targets"].append(str(target.id))
     for e in data.events:
         try:
+            e.meta = {**(e.meta or {}), "origin": "onboarding"}
             event = await schedule_service.create_event(db, user, e)
             created["events"].append(str(event.id))
         except HTTPException:
@@ -176,9 +200,10 @@ async def onboarding_commit(data: OnboardingCommitIn, user: User = Depends(curre
         mem = UserMemory(user_id=user.id, type=m.get("type", "preference"), key=m.get("key", "note"),
                          value={"value": m.get("value")}, source="user", confidence=1.0, status="active")
         db.add(mem)
-    await audit(db, user.id, "onboarding_completed", "user", user.id, {k: len(v) for k, v in created.items()})
+    await audit(db, user.id, "onboarding_completed", "user", user.id,
+                {k: len(v) for k, v in created.items()} | {"replaced": replaced})
     await db.commit()
-    return {"ok": True, "created": created}
+    return {"ok": True, "created": created, "replaced": replaced}
 
 
 @router.get("/recommendations", response_model=list[RecommendationOut])

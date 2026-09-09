@@ -23,6 +23,7 @@ const TARGET_DEFS = [
 
 export default function SettingsPage() {
   const toast = useToast();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.me });
   const { data: profile } = useQuery({ queryKey: ["profile"], queryFn: api.profile });
@@ -159,7 +160,15 @@ export default function SettingsPage() {
         </Card>
 
         <Card>
-          <CardTitle>Goals</CardTitle>
+          <CardTitle
+            right={
+              <Button size="sm" variant="outline" onClick={() => router.push("/onboarding?replace=1")}>
+                Redo setup interview
+              </Button>
+            }
+          >
+            Goals
+          </CardTitle>
           <div className="space-y-2">
             {goals?.map((g) => (
               <div key={g.id} className="flex items-center justify-between rounded-xl border border-line px-3.5 py-2.5">

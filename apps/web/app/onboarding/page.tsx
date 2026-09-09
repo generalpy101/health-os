@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Card, Field, Input, PageLoading, Textarea, useToast } from "@/components/ui";
 import { ProviderPicker } from "@/components/ai-picker";
 import { api } from "@/lib/api";
@@ -22,6 +22,11 @@ export default function OnboardingPage() {
   const [text, setText] = useState("");
   const [proposal, setProposal] = useState<EditableProposal | null>(null);
   const [busy, setBusy] = useState(false);
+  const [replace, setReplace] = useState(false);
+
+  useEffect(() => {
+    setReplace(new URLSearchParams(window.location.search).get("replace") === "1");
+  }, []);
 
   async function parse() {
     setBusy(true);
@@ -65,9 +70,10 @@ export default function OnboardingPage() {
         events,
         habits: [],
         memories: proposal.memories,
+        replace,
       });
       queryClient.clear();
-      toast("You're all set.");
+      toast(replace ? "Plan replaced." : "You're all set.");
       router.replace("/today");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to save", "err");
@@ -85,8 +91,14 @@ export default function OnboardingPage() {
       {step === "write" && (
         <div className="mt-10">
           <h1 className="font-display text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
-            Tell me about your life.
+            {replace ? "Rethink the plan." : "Tell me about your life."}
           </h1>
+          {replace && (
+            <p className="mt-2 rounded-xl border border-gold/40 bg-gold-soft px-3.5 py-2.5 text-[13px] text-gold">
+              Replace mode: your current active goals and targets are archived, and schedule events created
+              during onboarding are removed — before the new setup is written. Your logs and history are untouched.
+            </p>
+          )}
           <p className="mt-3 text-[15px] leading-relaxed text-muted">
             One honest paragraph — your goals, schedule, how you eat, how you train.
             I&rsquo;ll turn it into a plan you can edit. Nothing is set in stone.

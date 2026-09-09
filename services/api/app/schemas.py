@@ -572,6 +572,7 @@ class OnboardingCommitIn(BaseModel):
     events: list[EventIn] = Field(default_factory=list)
     habits: list[HabitIn] = Field(default_factory=list)
     memories: list[dict[str, Any]] = Field(default_factory=list)
+    replace: bool = False  # redo flow: archive current goals/targets/onboarding events first
 
 
 # ---------- recommendations ----------
