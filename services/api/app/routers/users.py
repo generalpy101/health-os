@@ -136,6 +136,7 @@ async def delete_account(user: User = Depends(current_user), db: AsyncSession = 
         models.Activity, models.WorkoutSession, models.WorkoutPlan, models.MealPlan,
         models.Recipe, models.FoodLog, models.Food, models.Target, models.Goal,
         models.Photo, models.Session, models.UserProfile,
+        models.PlanVersion, models.IntegrationEvent, models.Embedding,  # TRACK C
     ]
     photos = (await db.execute(select(models.Photo).where(models.Photo.user_id == user.id))).scalars().all()
     for p in photos:

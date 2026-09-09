@@ -9,6 +9,7 @@ from .migrate import run_migrations
 from .ratelimit import RateLimitMiddleware
 from .routers import (ai, analytics, auth, fitness, goals, health, notifications, nutrition,
                       photos, recipes, schedule, users)
+from .routers import platform  # TRACK C
 from .seed import seed
 
 
@@ -46,6 +47,7 @@ app.include_router(analytics.router, prefix=API)
 app.include_router(ai.router, prefix=API)
 app.include_router(photos.router, prefix=API)
 app.include_router(notifications.router, prefix=API)
+app.include_router(platform.router, prefix=API)  # TRACK C
 
 app.add_middleware(RateLimitMiddleware)
 

@@ -289,3 +289,31 @@ export interface OnboardingProposal {
   memories: { type: string; key: string; value: string }[];
   defaults_suggested?: { calories: number; protein_g: number; water_ml: number };
 }
+
+// === TRACK C ===
+
+export interface PlanVersion {
+  id: string;
+  version: number;
+  snapshot: Record<string, unknown>;
+  reason: string;
+  actor: "user" | "ai";
+  created_at: string;
+}
+
+export interface RecentPlanVersion extends PlanVersion {
+  entity_type: string;
+  entity_id: string;
+}
+
+export interface SearchResults {
+  foods: { id: string; name: string; calories: number }[];
+  recipes: { id: string; name: string }[];
+  exercises: { id: string; name: string }[];
+  conversations: { id: string; title: string }[];
+}
+
+export interface SemanticSearchResponse {
+  results: { entity_type: string; entity_id: string; snippet: string; score: number }[];
+  message?: string;
+}

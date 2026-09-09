@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
+import type { SearchResults } from "@/lib/types";
 import { cx } from "@/lib/utils";
 import { useToast } from "@/components/ui";
 
@@ -23,11 +24,20 @@ const ACTIONS = [
   { label: "Settings", href: "/settings", hint: "profile & AI" },
 ];
 
+interface Row {
+  label: string;
+  href: string;
+  hint: string;
+  group?: string; // set for live /search results (TRACK C)
+}
+
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [results, setResults] = useState<SearchResults | null>(null);
+  const searchSeq = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const toast = useToast();
@@ -49,11 +59,29 @@ export function CommandPalette() {
     if (open) {
       setQuery("");
       setIndex(0);
+      setResults(null);
       setTimeout(() => inputRef.current?.focus(), 30);
     }
   }, [open]);
 
-  const items = useMemo(() => {
+  // TRACK C: debounced live search while typing (>= 2 chars)
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      searchSeq.current++;
+      setResults(null);
+      return;
+    }
+    const t = setTimeout(() => {
+      const seq = ++searchSeq.current;
+      api.searchAll(q)
+        .then((r) => { if (searchSeq.current === seq) setResults(r); })
+        .catch(() => { if (searchSeq.current === seq) setResults(null); });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const actions = useMemo<Row[]>(() => {
     const q = query.toLowerCase().trim();
     const base = ACTIONS.filter((a) => !q || a.label.toLowerCase().includes(q) || a.hint.includes(q));
     if (q) {
@@ -65,6 +93,23 @@ export function CommandPalette() {
     }
     return base;
   }, [query]);
+
+  const rows = useMemo<Row[]>(() => {
+    const out = [...actions];
+    if (results) {
+      for (const f of results.foods)
+        out.push({ label: f.name, href: "/nutrition", hint: `${Math.round(f.calories)} kcal`, group: "Foods" });
+      for (const r of results.recipes)
+        out.push({ label: r.name, href: "/recipes", hint: "recipe", group: "Recipes" });
+      for (const e of results.exercises)
+        out.push({ label: e.name, href: "/workouts", hint: "exercise", group: "Exercises" });
+      for (const c of results.conversations)
+        out.push({ label: c.title, href: "/assistant", hint: "chat", group: "Chats" });
+    }
+    return out;
+  }, [actions, results]);
+
+  const active = Math.min(index, rows.length - 1);
 
   async function run(href: string) {
     if (href === "__ai__") {
@@ -104,9 +149,9 @@ export function CommandPalette() {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setIndex(0); }}
             onKeyDown={(e) => {
-              if (e.key === "ArrowDown") { e.preventDefault(); setIndex((i) => Math.min(i + 1, items.length - 1)); }
+              if (e.key === "ArrowDown") { e.preventDefault(); setIndex((i) => Math.min(i + 1, rows.length - 1)); }
               if (e.key === "ArrowUp") { e.preventDefault(); setIndex((i) => Math.max(i - 1, 0)); }
-              if (e.key === "Enter" && items[index]) run(items[index].href);
+              if (e.key === "Enter" && rows[active]) run(rows[active].href);
             }}
             placeholder="Go anywhere, log anything, ask AI…"
             className="h-13 flex-1 bg-transparent py-3.5 text-[15px] placeholder:text-faint focus:outline-none"
@@ -114,26 +159,32 @@ export function CommandPalette() {
           <kbd className="rounded-md border border-line px-1.5 py-0.5 text-[10px] font-medium text-faint">esc</kbd>
         </div>
         <div className="max-h-80 overflow-y-auto p-1.5">
-          {items.length === 0 && (
+          {rows.length === 0 && (
             <p className="px-3 py-6 text-center text-sm text-faint">No matches</p>
           )}
-          {items.map((item, i) => (
-            <button
-              key={item.href + item.label}
-              onMouseEnter={() => setIndex(i)}
-              onClick={() => run(item.href)}
-              disabled={busy}
-              className={cx(
-                "flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition-colors",
-                i === index ? "bg-surface-2 text-ink" : "text-muted"
+          {rows.map((item, i) => (
+            <div key={`${item.href}|${item.label}|${i}`}>
+              {item.group && rows[i - 1]?.group !== item.group && (
+                <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">
+                  {item.group}
+                </div>
               )}
-            >
-              <span className="font-medium">{item.label}</span>
-              <span className="flex items-center gap-1.5 text-[11px] text-faint">
-                {item.hint}
-                {i === index && <ArrowRight size={12} />}
-              </span>
-            </button>
+              <button
+                onMouseEnter={() => setIndex(i)}
+                onClick={() => run(item.href)}
+                disabled={busy}
+                className={cx(
+                  "flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition-colors",
+                  i === active ? "bg-surface-2 text-ink" : "text-muted"
+                )}
+              >
+                <span className="font-medium">{item.label}</span>
+                <span className="flex items-center gap-1.5 text-[11px] text-faint">
+                  {item.hint}
+                  {i === active && <ArrowRight size={12} />}
+                </span>
+              </button>
+            </div>
           ))}
         </div>
       </div>

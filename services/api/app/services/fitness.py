@@ -9,6 +9,7 @@ from ..schemas import ActivityIn, WorkoutIn, WorkoutPlanIn
 from ..utils import metrics
 from ..utils.time import parse_date
 from .common import audit, get_owned
+from .versions import record_version, row_snapshot
 
 
 async def search_exercises(db: AsyncSession, query: str = "", limit: int = 25) -> list[Exercise]:
@@ -85,8 +86,11 @@ async def list_plans(db: AsyncSession, user: User) -> list[WorkoutPlan]:
     return list(result.scalars().all())
 
 
-async def update_plan(db: AsyncSession, user: User, plan_id: UUID, data: WorkoutPlanIn) -> WorkoutPlan:
+async def update_plan(db: AsyncSession, user: User, plan_id: UUID, data: WorkoutPlanIn,
+                      *, reason: str | None = None, actor: str = "user") -> WorkoutPlan:
     plan = await get_owned(db, WorkoutPlan, plan_id, user)
+    await record_version(db, user.id, "workout_plan", plan.id, row_snapshot(plan),
+                         reason or "plan update", actor)
     for key, value in data.model_dump().items():
         setattr(plan, key, value)
     await db.commit()

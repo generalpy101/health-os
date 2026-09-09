@@ -382,3 +382,58 @@ class AuditLog(Base):
     entity_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     data: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
+
+
+# === TRACK C ===
+
+class PlanVersion(Base):
+    """Immutable snapshot of a goal/target/workout_plan row taken BEFORE a mutation.
+
+    Enables revert: the snapshot is written back through the normal service path.
+    """
+    __tablename__ = "plan_versions"
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, sa.ForeignKey("users.id"), index=True)
+    entity_type: Mapped[str] = mapped_column(sa.String(40), index=True)  # goal|target|workout_plan
+    entity_id: Mapped[str] = mapped_column(sa.String(64), index=True)
+    version: Mapped[int] = mapped_column(sa.Integer)
+    snapshot: Mapped[dict] = mapped_column(JSON, default=dict)  # full row, pre-change
+    reason: Mapped[str] = mapped_column(sa.String(200), default="")
+    actor: Mapped[str] = mapped_column(sa.String(16), default="user")  # user|ai
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
+
+
+class IntegrationEvent(Base):
+    """Raw event ingested from a device/shortcut. unique(user, source, external_id)
+    makes re-ingest idempotent; rows with NULL external_id are always accepted."""
+    __tablename__ = "integration_events"
+    __table_args__ = (
+        sa.UniqueConstraint("user_id", "source", "external_id", name="uq_integration_event"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, sa.ForeignKey("users.id"), index=True)
+    source: Mapped[str] = mapped_column(sa.String(40), index=True)  # apple_health|shortcut|...
+    external_id: Mapped[str | None] = mapped_column(sa.String(120), nullable=True)
+    metric: Mapped[str] = mapped_column(sa.String(40), index=True)  # steps|weight|water_ml|...
+    value: Mapped[float] = mapped_column(sa.Float)
+    unit: Mapped[str | None] = mapped_column(sa.String(24), nullable=True)
+    observed_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True))
+    raw: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
+
+
+class Embedding(Base):
+    """Cache of text embeddings for semantic search. vector is a plain JSON list of
+    floats (portable to SQLite); cosine similarity is computed in Python."""
+    __tablename__ = "embeddings"
+    __table_args__ = (
+        sa.UniqueConstraint("user_id", "entity_type", "entity_id", name="uq_embedding_entity"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, sa.ForeignKey("users.id"), index=True)
+    entity_type: Mapped[str] = mapped_column(sa.String(40))  # recipe|food|memory
+    entity_id: Mapped[str] = mapped_column(sa.String(64))
+    model: Mapped[str] = mapped_column(sa.String(120), default="")
+    text_hash: Mapped[str] = mapped_column(sa.String(64), default="")  # re-embed when text changes
+    vector: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
