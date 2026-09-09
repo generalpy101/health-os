@@ -17,6 +17,19 @@ def _to_utc(dt: datetime) -> datetime:
 
 
 async def create_event(db: AsyncSession, user: User, data: EventIn, source: str = "user") -> ScheduleEvent:
+    # an identical active recurring event (same type+title+days) already covers this — reuse it
+    if data.recurrence and data.recurrence.get("bydays"):
+        existing = await db.execute(
+            select(ScheduleEvent).where(
+                ScheduleEvent.user_id == user.id, ScheduleEvent.type == data.type,
+                ScheduleEvent.title == data.title, ScheduleEvent.status != "cancelled",
+                ScheduleEvent.recurrence.isnot(None),
+            )
+        )
+        new_days = sorted(data.recurrence["bydays"])
+        for e in existing.scalars().all():
+            if sorted((e.recurrence or {}).get("bydays", [])) == new_days:
+                return e
     start = _to_utc(data.start_at)
     end = _to_utc(data.end_at) if data.end_at else None
     if end and end <= start:

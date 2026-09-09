@@ -4,11 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChefHat, Plus, ShoppingBasket, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { TopBar } from "@/components/nav";
-import { DayTimeline } from "@/components/day-timeline";
+import { DayTimeline, type Block } from "@/components/day-timeline";
 import { Button, Card, Empty, Field, Input, PageLoading, Segmented, Select, Sheet, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
-import type { Recipe } from "@/lib/types";
-import { addDays, cx, fmtNumber, toISODate, todayISO } from "@/lib/utils";
+import type { FoodLog, Recipe, ScheduleEvent } from "@/lib/types";
+import { addDays, cx, fmtNumber, fmtTime, toISODate, todayISO } from "@/lib/utils";
 
 const SLOTS = ["breakfast", "lunch", "dinner", "snack"] as const;
 const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
@@ -18,6 +18,7 @@ export default function MealsPage() {
   const [view, setView] = useState<"board" | "timeline">("board");
   const [tlDay, setTlDay] = useState(todayISO());
   const [slot, setSlot] = useState<{ date: string; meal: string; time?: string } | null>(null);
+  const [block, setBlock] = useState<Block | null>(null);
   const [groceryOpen, setGroceryOpen] = useState(false);
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -109,6 +110,7 @@ export default function MealsPage() {
                 date: tlDay, meal: "other",
                 time: `${String(Math.floor(min / 60)).padStart(2, "0")}:00`,
               })}
+              onPickBlock={setBlock}
             />
           </>
         ) : (
@@ -213,8 +215,94 @@ export default function MealsPage() {
       </main>
 
       <AddMealSheet slot={slot} onClose={() => setSlot(null)} recipes={recipes || []} />
+      <BlockDetailSheet block={block} onClose={() => setBlock(null)} />
       <GrocerySheet open={groceryOpen} onClose={() => setGroceryOpen(false)} start={startISO} end={endISO} />
     </>
+  );
+}
+
+function BlockDetailSheet({ block, onClose }: { block: Block | null; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const invalidate = () => { queryClient.invalidateQueries(); onClose(); };
+
+  const delLog = useMutation({
+    mutationFn: api.deleteFoodLog, onSuccess: () => { toast("Log deleted"); invalidate(); },
+    onError: (e) => toast(e.message, "err"),
+  });
+  const delPlan = useMutation({
+    mutationFn: api.deleteMealPlan, onSuccess: () => { toast("Removed from plan"); invalidate(); },
+    onError: (e) => toast(e.message, "err"),
+  });
+  const delEvent = useMutation({
+    mutationFn: api.deleteEvent, onSuccess: () => { toast("Event deleted"); invalidate(); },
+    onError: (e) => toast(e.message, "err"),
+  });
+
+  if (!block) return null;
+  const hhmm = `${String(Math.floor(block.startMin / 60)).padStart(2, "0")}:${String(block.startMin % 60).padStart(2, "0")}`;
+
+  return (
+    <Sheet open={!!block} onClose={onClose} title={block.title}>
+      {block.kind === "log" && (() => {
+        const log = block.payload as FoodLog;
+        return (
+          <div className="space-y-4">
+            <p className="text-sm text-muted">Logged at {hhmm} · {log.meal_type.replace("_", " ")}</p>
+            <ul className="divide-y divide-line rounded-xl border border-line">
+              {log.items.map((i, idx) => (
+                <li key={idx} className="flex items-center justify-between px-3.5 py-2 text-sm">
+                  <span>{i.name} <span className="text-xs text-faint">{fmtNumber(i.quantity, 1)}{i.unit}</span></span>
+                  <span className="text-muted">{fmtNumber(i.calories)} kcal · {fmtNumber(i.protein)}g P</span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex items-center justify-between text-sm font-semibold">
+              <span>Total</span>
+              <span>{fmtNumber(log.calories)} kcal · {fmtNumber(log.protein)}g protein</span>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => { onClose(); window.location.href = "/nutrition"; }}>
+                Open in Nutrition
+              </Button>
+              <Button variant="danger" className="flex-1" onClick={() => delLog.mutate(log.id)} disabled={delLog.isPending}>
+                Delete entry
+              </Button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {block.kind === "plan" && (
+        <div className="space-y-4">
+          <p className="text-sm text-muted">
+            Planned · {block.sub}{block.startMin ? ` · ${hhmm}` : " · anytime"}
+          </p>
+          <Button variant="danger" className="w-full" onClick={() => delPlan.mutate(block.refId)} disabled={delPlan.isPending}>
+            Remove from plan
+          </Button>
+        </div>
+      )}
+
+      {block.kind === "event" && (() => {
+        const ev = block.payload as ScheduleEvent;
+        return (
+          <div className="space-y-4">
+            <p className="text-sm text-muted capitalize">
+              {ev.type} · starts {hhmm}{ev.recurring ? " · repeats weekly" : ""}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => { onClose(); window.location.href = "/schedule"; }}>
+                Edit in Planner
+              </Button>
+              <Button variant="danger" className="flex-1" onClick={() => delEvent.mutate(block.refId)} disabled={delEvent.isPending}>
+                Delete event
+              </Button>
+            </div>
+          </div>
+        );
+      })()}
+    </Sheet>
   );
 }
 

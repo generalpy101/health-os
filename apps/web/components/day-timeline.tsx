@@ -16,9 +16,15 @@ interface Block {
   color: string;
   soft: string;
   kind: "log" | "plan" | "event";
+  refId: string; // underlying row id
+  payload?: unknown;
 }
 
-export function DayTimeline({ day, onPickSlot }: { day: string; onPickSlot: (timeMin: number) => void }) {
+export type { Block };
+
+export function DayTimeline({ day, onPickSlot, onPickBlock }: {
+  day: string; onPickSlot: (timeMin: number) => void; onPickBlock: (block: Block) => void;
+}) {
   const { data: plans } = useQuery({ queryKey: ["meal-plans", day], queryFn: () => api.mealPlans(day, day) });
   const { data: logs } = useQuery({ queryKey: ["food-logs", day], queryFn: () => api.foodLogs(day) });
   const { data: events } = useQuery({ queryKey: ["schedule", day], queryFn: () => api.schedule(day, day) });
@@ -26,6 +32,7 @@ export function DayTimeline({ day, onPickSlot }: { day: string; onPickSlot: (tim
   const { blocks, unscheduled } = useMemo(() => {
     const blocks: Block[] = [];
     const unscheduled: Block[] = [];
+    const seenEvents = new Set<string>();
 
     for (const e of events || []) {
       const start = new Date(e.start_at);
@@ -33,22 +40,27 @@ export function DayTimeline({ day, onPickSlot }: { day: string; onPickSlot: (tim
       const startMin = start.getHours() * 60 + start.getMinutes();
       const endMin = Math.max(startMin + 30, end.getHours() * 60 + end.getMinutes() +
         (end.getDate() !== start.getDate() ? 24 * 60 : 0));
+      // dedupe identical recurring rows (leftover duplicates from repeated onboarding runs)
+      const dedupeKey = `${e.type}|${e.title}|${startMin}|${endMin}`;
+      if (seenEvents.has(dedupeKey)) continue;
+      seenEvents.add(dedupeKey);
       const color = EVENT_COLORS[e.type] || "var(--muted)";
       blocks.push({
         id: `ev-${e.id}-${startMin}`, title: e.title,
         sub: e.type, startMin, endMin: Math.min(endMin, 24 * 60),
         color, soft: `color-mix(in srgb, ${color} 16%, transparent)`, kind: "event",
+        refId: e.id, payload: e,
       });
     }
     for (const p of plans || []) {
       const color = "var(--olive)";
       const sub = p.recipe_id ? "planned recipe" : "planned";
       if (p.time == null) {
-        unscheduled.push({ id: `plan-${p.id}`, title: p.name, sub, startMin: 0, endMin: 0, color, soft: "var(--olive-soft)", kind: "plan" });
+        unscheduled.push({ id: `plan-${p.id}`, title: p.name, sub, startMin: 0, endMin: 0, color, soft: "var(--olive-soft)", kind: "plan", refId: p.id, payload: p });
       } else {
         const [h, m] = p.time.split(":").map(Number);
         const startMin = h * 60 + m;
-        blocks.push({ id: `plan-${p.id}`, title: p.name, sub, startMin, endMin: startMin + 45, color, soft: "var(--olive-soft)", kind: "plan" });
+        blocks.push({ id: `plan-${p.id}`, title: p.name, sub, startMin, endMin: startMin + 45, color, soft: "var(--olive-soft)", kind: "plan", refId: p.id, payload: p });
       }
     }
     for (const l of logs || []) {
@@ -58,6 +70,7 @@ export function DayTimeline({ day, onPickSlot }: { day: string; onPickSlot: (tim
         id: `log-${l.id}`, title: l.items.map((i) => i.name).slice(0, 3).join(", ") || l.meal_type,
         sub: `${fmtNumber(l.calories)} kcal · logged`, startMin, endMin: startMin + 30,
         color: "var(--accent)", soft: "var(--accent-soft)", kind: "log",
+        refId: l.id, payload: l,
       });
     }
     blocks.sort((a, b) => a.startMin - b.startMin);
@@ -103,7 +116,7 @@ export function DayTimeline({ day, onPickSlot }: { day: string; onPickSlot: (tim
 
           {/* blocks — side-by-side columns when overlapping */}
           <div className="absolute inset-y-0" style={{ left: 56, right: 8 }}>
-            <LayoutBlocks blocks={blocks} />
+            <LayoutBlocks blocks={blocks} onPick={onPickBlock} />
           </div>
         </div>
       </div>
@@ -118,7 +131,7 @@ export function DayTimeline({ day, onPickSlot }: { day: string; onPickSlot: (tim
 }
 
 /** Naive overlap layout: concurrent blocks share the width equally. */
-function LayoutBlocks({ blocks }: { blocks: Block[] }) {
+function LayoutBlocks({ blocks, onPick }: { blocks: Block[]; onPick: (b: Block) => void }) {
   // group into overlap clusters
   const clusters: Block[][] = [];
   for (const b of blocks) {
@@ -142,9 +155,10 @@ function LayoutBlocks({ blocks }: { blocks: Block[] }) {
           const colIdx = cols.findIndex((c) => c.includes(b));
           const w = 100 / cols.length;
           return (
-            <div
+            <button
               key={b.id}
-              className={cx("absolute overflow-hidden rounded-lg border-l-2 px-2 py-1", b.kind === "log" && "z-10")}
+              onClick={(e) => { e.stopPropagation(); onPick(b); }}
+              className={cx("absolute cursor-pointer overflow-hidden rounded-lg border-l-2 px-2 py-1 text-left transition-transform hover:scale-[1.02] hover:shadow-md", b.kind === "log" && "z-10")}
               style={{
                 top: (b.startMin / 60) * HOUR_PX,
                 height: Math.max(((b.endMin - b.startMin) / 60) * HOUR_PX, 22),
@@ -159,7 +173,7 @@ function LayoutBlocks({ blocks }: { blocks: Block[] }) {
               {b.sub && (b.endMin - b.startMin) >= 45 && (
                 <div className="truncate text-[10px] capitalize text-faint">{b.sub}</div>
               )}
-            </div>
+            </button>
           );
         });
       })}
