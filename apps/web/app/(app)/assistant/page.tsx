@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Empty, Sheet, Spinner } from "@/components/ui";
 import { ProviderPicker } from "@/components/ai-picker";
 import { api } from "@/lib/api";
-import type { ChatAction, ChatMessage } from "@/lib/types";
+import type { ChatAction, ChatMessage, TraceEvent } from "@/lib/types";
 import { cx, fmtDate, fmtTime } from "@/lib/utils";
 
 const SUGGESTIONS = [
@@ -24,9 +24,22 @@ export default function AssistantPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [liveTrace, setLiveTrace] = useState<TraceEvent[]>([]);
+  const [elapsed, setElapsed] = useState(0);
   const queryClient = useQueryClient();
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const traceRef = useRef<TraceEvent[]>([]);
+  const startRef = useRef(0);
+
+  // ticking "thought for Ns" timer while busy
+  useEffect(() => {
+    if (!busy) return;
+    setElapsed(0);
+    const t0 = Date.now();
+    const iv = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 500);
+    return () => clearInterval(iv);
+  }, [busy]);
 
   const { data: conversations } = useQuery({ queryKey: ["conversations"], queryFn: api.conversations });
 
@@ -104,15 +117,27 @@ export default function AssistantPage() {
     setMessages((m) => [...m, { role: "user", content: trimmed }]);
     setInput("");
     setBusy(true);
-    let arrived = false; // any server output (delta/actions/done) — used to gate the fallback
+    traceRef.current = [];
+    setLiveTrace([]);
+    startRef.current = Date.now();
+    let arrived = false; // any server output (delta/actions/done/trace) — used to gate the fallback
     try {
       await api.chatStream(trimmed, conversationId, {
         onDelta: (t) => { arrived = true; appendDelta(t); },
+        onTrace: (ev) => {
+          arrived = true;
+          traceRef.current = [...traceRef.current, ev];
+          setLiveTrace(traceRef.current);
+        },
         onActions: (actions) => { arrived = true; patchLast({ actions }); },
-        onDone: (cid, reply) => {
+        onDone: (cid, reply, elapsedS) => {
           arrived = true;
           setConversationId(cid);
-          patchLast({ content: reply });
+          patchLast({
+            content: reply,
+            elapsedS: elapsedS ?? Math.round((Date.now() - startRef.current) / 1000),
+            trace: traceRef.current,
+          });
         },
       });
       queryClient.invalidateQueries(); // AI actions may have changed anything
@@ -230,12 +255,53 @@ export default function AssistantPage() {
                   ))}
                 </div>
               )}
+              {m.role === "assistant" && m.elapsedS != null && (
+                <details className="mt-1.5 group">
+                  <summary className="cursor-pointer list-none text-[11px] text-faint hover:text-muted">
+                    Thought for {m.elapsedS >= 60 ? `${Math.floor(m.elapsedS / 60)}m ${Math.round(m.elapsedS % 60)}s` : `${Math.round(m.elapsedS)}s`}
+                    {(m.trace?.filter((t) => t.kind === "tool_end").length ?? 0) > 0 &&
+                      ` · ${m.trace!.filter((t) => t.kind === "tool_end").length} tool${m.trace!.filter((t) => t.kind === "tool_end").length > 1 ? "s" : ""}`}
+                  </summary>
+                  <div className="mt-1 space-y-0.5 border-l-2 border-line pl-2.5">
+                    {(m.trace || []).filter((t) => t.kind !== "heartbeat").map((t, i) => (
+                      <div key={i} className="font-mono text-[10px] text-faint">
+                        {t.kind === "thinking" && `→ thinking (round ${t.round})`}
+                        {t.kind === "thought" && `✓ reply drafted in ${(t.ms ?? 0) / 1000}s`}
+                        {t.kind === "tool_start" && `→ ${t.tool?.replaceAll("_", " ")}…`}
+                        {t.kind === "tool_end" && `${t.status === "executed" ? "✓" : "✗"} ${t.tool?.replaceAll("_", " ")} · ${t.ms}ms`}
+                        {t.kind === "error" && `✗ ${t.detail}`}
+                        {t.elapsed_s != null && <span className="text-faint/60"> [{t.elapsed_s}s]</span>}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
             </div>
           </div>
         ))}
         {busy && messages[messages.length - 1]?.role === "user" && (
-          <div className="flex items-center gap-2 text-sm text-muted">
-            <Spinner className="h-4 w-4" /> Thinking…
+          <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-line bg-surface px-4 py-3">
+            <div className="flex items-center gap-2 text-sm text-muted">
+              <Spinner className="h-4 w-4" />
+              <span>Thinking{elapsed > 2 ? ` — ${elapsed}s` : "…"}</span>
+            </div>
+            {liveTrace.filter((t) => t.kind.startsWith("tool")).length > 0 && (
+              <div className="mt-2 space-y-1 border-t border-line pt-2">
+                {liveTrace.filter((t) => t.kind === "tool_end").map((t, i) => (
+                  <div key={i} className="flex items-center gap-1.5 font-mono text-[11px] text-faint">
+                    {t.status === "executed"
+                      ? <CheckCircle2 size={11} className="text-good" />
+                      : <XCircle size={11} className="text-bad" />}
+                    {t.tool?.replaceAll("_", " ")} · {t.ms}ms
+                  </div>
+                ))}
+              </div>
+            )}
+            {elapsed >= 10 && (
+              <p className="mt-1.5 text-[11px] text-faint">
+                Still working — CLI providers can take a minute. The request is alive.
+              </p>
+            )}
           </div>
         )}
         <div ref={bottomRef} />

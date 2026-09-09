@@ -124,13 +124,14 @@ async def _get_conversation(db: AsyncSession, user: User, conversation_id: UUID 
 
 
 async def _chat_core(db: AsyncSession, user: User, message: str, conversation_id: UUID | None = None,
-                     provider: AIProvider | None = None, on_delta=None,
+                     provider: AIProvider | None = None, on_delta=None, on_trace=None,
                      ) -> tuple[AIConversation, str, list[AIAction]]:
     """Shared chat loop for /ai/chat and /ai/chat/stream.
 
     When `on_delta` is given, provider rounds go through provider.stream() and text
     deltas are forwarded as they arrive; tool execution and ai_actions auditing are
-    identical either way.
+    identical either way. `on_trace` receives progress events (thinking/heartbeat/
+    tool_start/tool_end/thought) so the UI can show live reasoning progress.
     """
     settings = get_settings()
     provider = provider or await provider_for_user(db, user)
@@ -152,17 +153,38 @@ async def _chat_core(db: AsyncSession, user: User, message: str, conversation_id
 
     actions: list[AIAction] = []
     reply = ""
+    t0 = time.perf_counter()
+
+    async def trace(payload: dict) -> None:
+        if on_trace is not None:
+            await on_trace({**payload, "elapsed_s": round(time.perf_counter() - t0, 1)})
+
+    async def call_provider() -> Any:
+        """Run the provider with 5s heartbeat traces so slow CLIs show life."""
+        async def _call() -> Any:
+            if on_delta is None:
+                return await provider.complete(messages, tools=tool_schemas())
+            return await provider.stream(messages, tools=tool_schemas(), on_delta=on_delta)
+
+        task = asyncio.create_task(_call())
+        while not task.done():
+            try:
+                return await asyncio.wait_for(asyncio.shield(task), timeout=5)
+            except asyncio.TimeoutError:
+                await trace({"kind": "heartbeat"})
+        return task.result()  # raises if the provider failed
+
     for _round in range(settings.ai_max_tool_rounds):
         started = time.perf_counter()
+        await trace({"kind": "thinking", "round": _round + 1})
         try:
-            if on_delta is None:
-                resp = await provider.complete(messages, tools=tool_schemas())
-            else:
-                resp = await provider.stream(messages, tools=tool_schemas(), on_delta=on_delta)
+            resp = await call_provider()
         except Exception as exc:
             reply = (f"The AI provider is unavailable right now ({type(exc).__name__}). "
                      "You can still use every screen and log manually — nothing here depends on AI.")
+            await trace({"kind": "error", "detail": type(exc).__name__})
             break
+        await trace({"kind": "thought", "ms": int((time.perf_counter() - started) * 1000)})
         if not resp.tool_calls:
             reply = resp.text or "Done."
             break
@@ -177,8 +199,11 @@ async def _chat_core(db: AsyncSession, user: User, message: str, conversation_id
             if fingerprint in seen_calls:
                 continue
             seen_calls.add(fingerprint)
+            await trace({"kind": "tool_start", "tool": call.name})
+            tool_started = time.perf_counter()
             latency = int((time.perf_counter() - started) * 1000)
             result = await execute_tool(db, user, call.name, call.arguments)
+            tool_ms = int((time.perf_counter() - tool_started) * 1000)
             risk = REGISTRY.get(call.name, (None, None, "low"))[2]
             status = "failed" if "error" in result else "executed"
             action = AIAction(user_id=user.id, conversation_id=conv.id, tool=call.name,
@@ -187,6 +212,7 @@ async def _chat_core(db: AsyncSession, user: User, message: str, conversation_id
                               latency_ms=latency)
             db.add(action)
             actions.append(action)
+            await trace({"kind": "tool_end", "tool": call.name, "status": status, "ms": tool_ms})
             messages.append({"role": "tool", "tool_call_id": call.id, "name": call.name,
                              "content": json.dumps(result, default=str)})
     else:
@@ -224,16 +250,22 @@ async def chat_stream(db: AsyncSession, user: User, message: str,
     async def on_delta(text: str) -> None:
         await queue.put({"type": "delta", "text": text})
 
+    async def on_trace(payload: dict) -> None:
+        await queue.put({"type": "trace", **payload})
+
     async def run() -> None:
+        t0 = time.perf_counter()
         try:
-            conv, reply, actions = await _chat_core(db, user, message, conversation_id, on_delta=on_delta)
+            conv, reply, actions = await _chat_core(db, user, message, conversation_id,
+                                                    on_delta=on_delta, on_trace=on_trace)
             await queue.put({"type": "actions", "actions": [
                 {"id": str(a.id), "tool": a.tool, "arguments": _s(a.arguments),
                  "result": _s(a.result), "status": a.status,
                  "created_at": a.created_at.isoformat() if a.created_at else None}
                 for a in actions
             ]})
-            await queue.put({"type": "done", "conversation_id": str(conv.id), "reply": reply})
+            await queue.put({"type": "done", "conversation_id": str(conv.id), "reply": reply,
+                             "elapsed_s": round(time.perf_counter() - t0, 1)})
         except Exception as exc:
             await queue.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
         finally:

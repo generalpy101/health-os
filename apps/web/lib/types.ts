@@ -252,10 +252,22 @@ export interface ChatAction {
   status: string;
 }
 
+export interface TraceEvent {
+  kind: "thinking" | "heartbeat" | "thought" | "tool_start" | "tool_end" | "error";
+  tool?: string;
+  status?: string;
+  ms?: number;
+  round?: number;
+  elapsed_s?: number;
+  detail?: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   actions?: ChatAction[];
+  elapsedS?: number;
+  trace?: TraceEvent[];
 }
 
 export interface Conversation {
@@ -358,8 +370,9 @@ export interface Review {
 
 export interface ChatStreamHandlers {
   onDelta?: (text: string) => void;
+  onTrace?: (event: TraceEvent) => void;
   onActions?: (actions: ChatAction[]) => void;
-  onDone?: (conversationId: string, reply: string) => void;
+  onDone?: (conversationId: string, reply: string, elapsedS?: number) => void;
 }
 
 // === TRACK D ===

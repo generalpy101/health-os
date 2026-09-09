@@ -354,8 +354,9 @@ async function postSSE(path: string, body: unknown, handlers: ChatStreamHandlers
       if (!dataLines.length) continue;
       const data = JSON.parse(dataLines.join("\n"));
       if (event === "delta") handlers.onDelta?.(data.text ?? "");
+      else if (event === "trace") handlers.onTrace?.(data as import("./types").TraceEvent);
       else if (event === "actions") handlers.onActions?.(data.actions ?? []);
-      else if (event === "done") handlers.onDone?.(data.conversation_id, data.reply);
+      else if (event === "done") handlers.onDone?.(data.conversation_id, data.reply, data.elapsed_s);
       else if (event === "error") throw new ApiError(500, data.message || "Stream failed");
     }
   }
