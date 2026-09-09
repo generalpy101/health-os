@@ -228,6 +228,19 @@ function GrocerySheet({ open, onClose, start, end }: { open: boolean; onClose: (
     queryFn: () => api.groceryList(start, end),
     enabled: open,
   });
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  // TRACK D: restock the pantry from the week's groceries in one tap
+  const purchase = useMutation({
+    mutationFn: () => api.purchaseGroceries(start, end),
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ["pantry"] });
+      queryClient.invalidateQueries({ queryKey: ["pantry-matches"] });
+      toast(`Added ${r.added} item${r.added === 1 ? "" : "s"} to pantry`);
+      onClose();
+    },
+    onError: (e) => toast(e.message, "err"),
+  });
   return (
     <Sheet open={open} onClose={onClose} title="Grocery list — this week">
       {isLoading ? (
@@ -235,18 +248,23 @@ function GrocerySheet({ open, onClose, start, end }: { open: boolean; onClose: (
       ) : !data?.items.length ? (
         <Empty title="Nothing to buy" hint="Plan meals with recipes and ingredients consolidate here automatically." />
       ) : (
-        <ul className="divide-y divide-line">
-          {data.items.map((i) => (
-            <li key={i.name + i.unit} className="flex items-center justify-between py-2.5 text-sm">
-              <span className="font-medium capitalize">{i.name}</span>
-              <span className="font-display font-semibold">
-                {i.unit === "g" && i.quantity >= 1000
-                  ? `${(i.quantity / 1000).toFixed(1)} kg`
-                  : `${fmtNumber(i.quantity, 1)} ${i.unit}`}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="divide-y divide-line">
+            {data.items.map((i) => (
+              <li key={i.name + i.unit} className="flex items-center justify-between py-2.5 text-sm">
+                <span className="font-medium capitalize">{i.name}</span>
+                <span className="font-display font-semibold">
+                  {i.unit === "g" && i.quantity >= 1000
+                    ? `${(i.quantity / 1000).toFixed(1)} kg`
+                    : `${fmtNumber(i.quantity, 1)} ${i.unit}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <Button className="mt-4 w-full" variant="outline" onClick={() => purchase.mutate()} disabled={purchase.isPending}>
+            <Check size={15} /> {purchase.isPending ? "Adding…" : "Mark all purchased"}
+          </Button>
+        </>
       )}
     </Sheet>
   );

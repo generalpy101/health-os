@@ -472,3 +472,30 @@ class PushSubscription(Base):
     endpoint: Mapped[str] = mapped_column(sa.Text, unique=True)
     keys: Mapped[dict] = mapped_column(JSON, default=dict)  # {p256dh, auth}
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
+
+
+# === TRACK D ===
+
+class SavedMeal(TimestampMixin, Base):
+    """A named bundle of food-log items the user re-logs often ('my usual breakfast').
+    items stores the resolved snapshot so the meal survives food-db edits."""
+    __tablename__ = "saved_meals"
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, sa.ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(sa.String(200))
+    items: Mapped[list] = mapped_column(JSON, default=list)  # resolved food-log item snapshots
+    use_count: Mapped[int] = mapped_column(sa.Integer, default=0)
+    last_used_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+
+class PantryItem(TimestampMixin, Base):
+    """Something the user has on hand. Matched against recipe ingredients by name."""
+    __tablename__ = "pantry_items"
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, sa.ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(sa.String(200))
+    quantity: Mapped[float] = mapped_column(sa.Float, default=1)
+    unit: Mapped[str] = mapped_column(sa.String(24), default="pcs")
+    expires_on: Mapped[date | None] = mapped_column(sa.Date, nullable=True)
+    location: Mapped[str] = mapped_column(sa.String(40), default="pantry")  # pantry|fridge|freezer|...
+    food_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid, sa.ForeignKey("foods.id"), nullable=True)

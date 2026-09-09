@@ -13,6 +13,9 @@ export default function RecipesPage() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const { data: recipes, isLoading } = useQuery({ queryKey: ["recipes", q], queryFn: () => api.recipes(q) });
+  // TRACK D: what you can cook from the pantry right now
+  const { data: matches } = useQuery({ queryKey: ["pantry-matches"], queryFn: api.pantryRecipeMatches });
+  const cookable = (matches || []).filter((m) => m.coverage >= 0.6);
   const queryClient = useQueryClient();
   const toast = useToast();
   const del = useMutation({
@@ -29,6 +32,24 @@ export default function RecipesPage() {
           <Search size={16} className="absolute left-3.5 top-3.5 text-faint" />
           <Input className="pl-10" placeholder="Search recipes…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
+        {cookable.length > 0 && (
+          <div className="mb-4">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+              From your pantry
+            </div>
+            <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+              {cookable.map((m) => (
+                <div key={m.recipe_id} className="min-w-[10rem] shrink-0 rounded-xl border border-line bg-surface p-3">
+                  <div className="truncate text-sm font-semibold">{m.name}</div>
+                  <div className="mt-1 text-[11px] text-faint">
+                    <span className="font-semibold text-olive">{Math.round(m.coverage * 100)}% in pantry</span>
+                    {m.missing.length > 0 && <span> · missing {m.missing.length}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {isLoading ? (
           <PageLoading />
         ) : !recipes?.length ? (

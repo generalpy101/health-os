@@ -133,6 +133,7 @@ export interface Workout {
   total_volume: number;
   notes: string | null;
   created_at: string;
+  new_prs?: NewPR[]; // TRACK D — only set on the log response
 }
 
 export interface WorkoutPlan {
@@ -354,4 +355,81 @@ export interface ChatStreamHandlers {
   onDelta?: (text: string) => void;
   onActions?: (actions: ChatAction[]) => void;
   onDone?: (conversationId: string, reply: string) => void;
+}
+
+// === TRACK D ===
+
+export interface SavedMeal {
+  id: string;
+  name: string;
+  items: FoodLogItem[];
+  use_count: number;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+export interface FrequentFood {
+  food_id: string | null;
+  name: string;
+  calories: number;
+  protein: number;
+  uses: number;
+}
+
+export interface NewPR {
+  exercise: string;
+  kind: "weight" | "volume";
+  value: number;
+  previous: number | null;
+}
+
+export interface PRRecord {
+  exercise: string;
+  best_weight: number | null;
+  reps_at_best: number | null;
+  best_volume_set: number | null;
+  date: string | null;
+  is_recent: boolean;
+}
+
+export interface ActivityDay {
+  date: string;
+  workouts: number;
+  habits_done: number;
+  habits_total: number;
+  logged_food: boolean;
+  score: 0 | 1 | 2 | 3;
+}
+
+export interface StallFactor {
+  label: string;
+  value: number | null;
+  verdict: "ok" | "low";
+}
+
+export interface StallInfo {
+  applies: boolean;
+  stalled: boolean;
+  weekly_rate: number | null;
+  weeks_tracked: number;
+  factors: StallFactor[];
+  suggestion: string;
+}
+
+export interface PantryItem {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  expires_on: string | null;
+  location: string;
+  food_id: string | null;
+  created_at: string;
+}
+
+export interface RecipeMatch {
+  recipe_id: string;
+  name: string;
+  coverage: number;
+  missing: string[];
 }

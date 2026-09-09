@@ -10,6 +10,7 @@ from .ratelimit import RateLimitMiddleware
 from .routers import (ai, analytics, auth, fitness, goals, health, imports, notifications, nutrition,
                       photos, push, recipes, reviews, schedule, users)
 from .routers import platform  # TRACK C
+from .routers import extras, pantry  # TRACK D
 from .seed import seed
 from .worker import start_worker, stop_worker
 
@@ -58,6 +59,9 @@ app.include_router(imports.router, prefix=API)
 # TRACK B
 app.include_router(reviews.router, prefix=API)
 app.include_router(push.router, prefix=API)
+# TRACK D
+app.include_router(extras.router, prefix=API)
+app.include_router(pantry.router, prefix=API)
 
 app.add_middleware(RateLimitMiddleware)
 

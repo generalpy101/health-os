@@ -1,8 +1,9 @@
 import type {
-  ChatAction, ChatStreamHandlers, Conversation, DailySummary, Food, FoodLog, Goal, Habit,
-  HabitProgress, ImportKind, ImportPreview, ImportResult, Measurement, NutritionDay,
-  OnboardingProposal, Profile, RangeSummary, Recipe, Review, ScheduleEvent, SleepLog, Target,
-  User, WeightTrend, Workout,
+  ActivityDay, ChatAction, ChatStreamHandlers, Conversation, DailySummary, Food, FoodLog,
+  FrequentFood, Goal, Habit, HabitProgress, ImportKind, ImportPreview, ImportResult, Measurement,
+  NutritionDay, OnboardingProposal, PantryItem, Profile, PRRecord, RangeSummary, Recipe,
+  RecipeMatch, Review, SavedMeal, ScheduleEvent, SleepLog, StallInfo, Target, User, WeightTrend,
+  Workout,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -374,4 +375,39 @@ const apiTrackB = {
   pushTest: () => post<{ sent: number }>("/push/test", {}),
 };
 
-export const api = Object.assign(apiBase, apiTrackB);
+// === TRACK D ===
+
+const apiTrackD = {
+  // saved meals & frequent foods
+  savedMeals: () => request<SavedMeal[]>("/saved-meals"),
+  createSavedMeal: (b: { name: string; from_log_id?: string; items?: object[] }) =>
+    post<SavedMeal>("/saved-meals", b),
+  logSavedMeal: (id: string, b: { meal_type?: string; date?: string } = {}) =>
+    post<FoodLog>(`/saved-meals/${id}/log`, b),
+  deleteSavedMeal: (id: string) => del(`/saved-meals/${id}`),
+  frequentFoods: (limit = 12) => request<FrequentFood[]>(`/foods/frequent${qs({ limit })}`),
+
+  // prs
+  workoutPrs: () => request<PRRecord[]>("/workouts/prs"),
+
+  // activity calendar & stall insight
+  activityCalendar: (days = 180) => request<ActivityDay[]>(`/analytics/activity-calendar${qs({ days })}`),
+  stallInsight: () => request<StallInfo>("/insights/stall"),
+
+  // pantry
+  pantry: () => request<PantryItem[]>("/pantry"),
+  addPantryItem: (b: {
+    name: string; quantity: number; unit: string;
+    expires_on?: string; location?: string; food_id?: string;
+  }) => post<PantryItem>("/pantry", b),
+  updatePantryItem: (id: string, b: Partial<{
+    name: string; quantity: number; unit: string;
+    expires_on: string | null; location: string; food_id: string | null;
+  }>) => patch<PantryItem>(`/pantry/${id}`, b),
+  deletePantryItem: (id: string) => del(`/pantry/${id}`),
+  pantryRecipeMatches: () => request<RecipeMatch[]>("/pantry/recipe-matches"),
+  purchaseGroceries: (start: string, end: string) =>
+    post<{ added: number }>("/grocery-list/purchase", { start, end }),
+};
+
+export const api = Object.assign(apiBase, apiTrackB, apiTrackD);

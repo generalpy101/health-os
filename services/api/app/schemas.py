@@ -337,6 +337,13 @@ class WorkoutIn(BaseModel):
         return v.strip() or "Workout"
 
 
+class NewPR(BaseModel):
+    exercise: str
+    kind: Literal["weight", "volume"]
+    value: float
+    previous: float | None = None
+
+
 class WorkoutOut(ORMModel):
     id: UUID
     date: date
@@ -346,6 +353,7 @@ class WorkoutOut(ORMModel):
     total_volume: float
     notes: str | None
     created_at: datetime
+    new_prs: list[NewPR] = Field(default_factory=list)  # TRACK D (set transiently by log_workout)
 
 
 class WorkoutPlanIn(BaseModel):
@@ -636,3 +644,117 @@ class ImportCommitIn(BaseModel):
 class ImportCommitOut(BaseModel):
     imported: int
     skipped: int
+
+
+# === TRACK D ===
+
+# ---------- saved meals / frequent foods ----------
+
+class SavedMealIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    items: list[FoodLogItemIn] | None = None  # ...or from_log_id to snapshot an existing log
+    from_log_id: UUID | None = None
+
+
+class SavedMealOut(ORMModel):
+    id: UUID
+    name: str
+    items: list[dict[str, Any]]
+    use_count: int
+    last_used_at: datetime | None
+    created_at: datetime
+
+
+class SavedMealLogIn(BaseModel):
+    meal_type: str = "other"
+    date: OptDate = None
+
+
+class FrequentFoodOut(BaseModel):
+    food_id: UUID | None
+    name: str
+    calories: float
+    protein: float
+    uses: int
+
+
+# ---------- PRs ----------
+
+class PROut(BaseModel):
+    exercise: str
+    best_weight: float | None
+    reps_at_best: float | None
+    best_volume_set: float | None
+    date: date | None
+    is_recent: bool
+
+
+# ---------- activity calendar ----------
+
+class ActivityDayOut(BaseModel):
+    date: date
+    workouts: int
+    habits_done: int
+    habits_total: int
+    logged_food: bool
+    score: int  # 0 none, 1 light, 2 medium, 3 full
+
+
+# ---------- stall detector ----------
+
+class StallFactor(BaseModel):
+    label: str
+    value: float | None  # ratio 0..1+ (adherence / actual-vs-target); None = no data
+    verdict: Literal["ok", "low"]
+
+
+class StallOut(BaseModel):
+    applies: bool
+    stalled: bool
+    weekly_rate: float | None
+    weeks_tracked: float
+    factors: list[StallFactor]
+    suggestion: str
+
+
+# ---------- pantry ----------
+
+class PantryItemIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    quantity: float = Field(default=1, ge=0)
+    unit: str = Field(default="pcs", max_length=24)
+    expires_on: date | None = None
+    location: str = Field(default="pantry", max_length=40)
+    food_id: UUID | None = None
+
+
+class PantryItemPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    quantity: float | None = Field(default=None, ge=0)
+    unit: str | None = Field(default=None, max_length=24)
+    expires_on: date | None = None
+    location: str | None = Field(default=None, max_length=40)
+    food_id: UUID | None = None
+
+
+class PantryItemOut(ORMModel):
+    id: UUID
+    name: str
+    quantity: float
+    unit: str
+    expires_on: date | None
+    location: str
+    food_id: UUID | None
+    created_at: datetime
+
+
+class RecipeMatchOut(BaseModel):
+    recipe_id: UUID
+    name: str
+    coverage: float  # 0..1
+    missing: list[str]
+
+
+class GroceryPurchaseIn(BaseModel):
+    start: date
+    end: date
