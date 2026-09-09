@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Camera, Droplet, MessageCircle, Moon, Plus, Ruler, Scale, UtensilsCrossed } from "lucide-react";
+import { Camera, ChefHat, Droplet, MessageCircle, Moon, Plus, Ruler, Scale, UtensilsCrossed } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Button, Input, Field, Select, Sheet, Spinner, useToast } from "@/components/ui";
@@ -9,7 +9,7 @@ import { api } from "@/lib/api";
 import type { FrequentFood } from "@/lib/types";
 import { fmtNumber } from "@/lib/utils";
 
-type Mode = null | "menu" | "food" | "water" | "weight" | "sleep" | "photo" | "measure";
+type Mode = null | "menu" | "food" | "water" | "weight" | "sleep" | "photo" | "measure" | "suggest";
 
 export function QuickLog() {
   const [mode, setMode] = useState<Mode>(null);
@@ -29,6 +29,7 @@ export function QuickLog() {
           {[
             { icon: UtensilsCrossed, label: "Food", action: () => setMode("food"), tone: "var(--accent)" },
             { icon: Camera, label: "Meal photo", action: () => setMode("photo"), tone: "var(--accent)" },
+            { icon: ChefHat, label: "What to eat?", action: () => setMode("suggest"), tone: "var(--olive)" },
             { icon: Droplet, label: "Water", action: () => setMode("water"), tone: "var(--lake)" },
             { icon: Scale, label: "Weight", action: () => setMode("weight"), tone: "var(--gold)" },
             { icon: Moon, label: "Sleep", action: () => setMode("sleep"), tone: "var(--berry)" },
@@ -66,7 +67,80 @@ export function QuickLog() {
       <SleepQuickLog open={mode === "sleep"} onClose={() => setMode(null)} />
       <PhotoQuickLog open={mode === "photo"} onClose={() => setMode(null)} />
       <MeasureQuickLog open={mode === "measure"} onClose={() => setMode(null)} />
+      <SuggestMealSheet open={mode === "suggest"} onClose={() => setMode(null)} />
     </>
+  );
+}
+
+function SuggestMealSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["meal-suggestions"],
+    queryFn: api.mealSuggestions,
+    enabled: open,
+  });
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const done = useDone(onClose);
+  const [busy, setBusy] = useState(false);
+
+  async function logSuggestion(s: { kind: string; id: string; name: string }) {
+    setBusy(true);
+    try {
+      if (s.kind === "saved_meal") {
+        await api.logSavedMeal(s.id, {});
+      } else {
+        const recipe = await api.recipes().then((rs) => rs.find((r) => r.id === s.id));
+        if (recipe) {
+          await api.logFood({
+            meal_type: "other",
+            note: `Recipe: ${recipe.name}`,
+            items: recipe.ingredients.map((i) => ({
+              name: i.name, quantity: i.quantity, unit: i.unit,
+              ...(i.food_id ? { food_id: i.food_id } : {}),
+            })),
+          });
+        }
+      }
+      queryClient.invalidateQueries();
+      done(`Logged ${s.name}`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "err");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Sheet open={open} onClose={onClose} title="What should you eat?">
+      {isLoading ? (
+        <div className="flex justify-center py-8"><Spinner /></div>
+      ) : !data?.suggestions.length ? (
+        <p className="py-6 text-center text-sm text-muted">{data?.message || "Nothing to suggest yet."}</p>
+      ) : (
+        <div className="space-y-2.5">
+          {data.remaining && (data.remaining.calories != null || data.remaining.protein != null) && (
+            <p className="text-xs text-faint">
+              Left today: {data.remaining.calories != null ? `~${fmtNumber(data.remaining.calories)} kcal` : ""}
+              {data.remaining.calories != null && data.remaining.protein != null ? " · " : ""}
+              {data.remaining.protein != null ? `${fmtNumber(data.remaining.protein)}g protein` : ""}
+            </p>
+          )}
+          {data.suggestions.map((s) => (
+            <div key={s.id} className="flex items-center gap-3 rounded-xl border border-line p-3.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold">{s.name}</div>
+                <div className="mt-0.5 text-xs text-faint">
+                  {fmtNumber(s.calories)} kcal · {fmtNumber(s.protein)}g P
+                  {s.coverage != null && ` · ${Math.round(s.coverage * 100)}% in pantry`}
+                </div>
+                <div className="mt-0.5 text-[11px] text-olive">{s.reason}</div>
+              </div>
+              <Button size="sm" onClick={() => logSuggestion(s)} disabled={busy}>Log</Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Sheet>
   );
 }
 

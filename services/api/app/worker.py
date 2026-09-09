@@ -86,6 +86,32 @@ async def _extract_observations(db: AsyncSession, job: BackgroundJob) -> None:
     await db.commit()
 
 
+@handler("coach_checkin")
+async def _coach_checkin(db: AsyncSession, job: BackgroundJob) -> None:
+    """Hourly chain: at each user's local 21:00, write a short coach check-in
+    (today's numbers → tomorrow's one fix) as a recommendation + push.
+    Payload {"sent": {user_id: date}} prevents doubles."""
+    from ..models import Recommendation  # noqa: F401
+    from .services import checkin as checkin_service
+    from .utils.time import user_now
+
+    sent: dict[str, str] = dict(job.payload.get("sent") or {})
+    today_utc = datetime.now(timezone.utc).date().isoformat()
+    users = (await db.execute(select(User))).scalars().all()
+    for user in users:
+        local = user_now(user.timezone)
+        if local.hour != 21:  # their 9 PM, not the server's
+            continue
+        if sent.get(str(user.id)) == today_utc:
+            continue
+        await checkin_service.run_checkin(db, user)
+        sent[str(user.id)] = today_utc
+
+    await enqueue(db, "coach_checkin", {"sent": sent},
+                  run_at=datetime.now(timezone.utc) + timedelta(hours=1))
+    await db.commit()
+
+
 @handler("onboarding_parse")
 async def _onboarding_parse(db: AsyncSession, job: BackgroundJob) -> None:
     """Long-running onboarding extraction (CLI/hosted LLMs can take 30-60s).
@@ -146,13 +172,14 @@ async def _check_reminders(db: AsyncSession, job: BackgroundJob) -> None:
 
 async def _ensure_reminder_job(db: AsyncSession) -> None:
     """Backstop: guarantee pending/running chains exist for the recurring jobs."""
-    for kind, delay in (("check_reminders", None), ("extract_observations", timedelta(hours=24))):
+    for kind, delay in (("check_reminders", None), ("extract_observations", timedelta(hours=24)),
+                        ("coach_checkin", timedelta(hours=1))):
         existing = (await db.execute(
             select(BackgroundJob.id).where(BackgroundJob.kind == kind,
                                            BackgroundJob.status.in_(("pending", "running"))).limit(1)
         )).first()
         if existing is None:
-            await enqueue(db, kind, {"sent": {}} if kind == "check_reminders" else {},
+            await enqueue(db, kind, {"sent": {}} if kind in ("check_reminders", "coach_checkin") else {},
                           run_at=datetime.now(timezone.utc) + delay if delay else None)
     await db.commit()
 

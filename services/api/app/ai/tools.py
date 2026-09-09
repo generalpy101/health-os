@@ -286,6 +286,11 @@ async def h_delete_recipe(db, user, args):
     return {"deleted": True}
 
 
+async def h_suggest_meal(db, user, args):
+    from ..services import suggest as suggest_service
+    return await suggest_service.meal_suggestions(db, user)
+
+
 async def h_get_user_memories(db, user, args):
     result = await db.execute(
         select(UserMemory).where(UserMemory.user_id == user.id, UserMemory.status == "active")
@@ -364,6 +369,7 @@ REGISTRY: dict[str, tuple[dict, Handler, str]] = {
     "create_memory": (_schema("create_memory", "Remember a user preference or fact", {
         "type": S, "key": S, "value": S, "confidence": N}, ["key", "value"]), h_create_memory, LOW),
     "get_user_memories": (_schema("get_user_memories", "Retrieve remembered preferences/facts", {"limit": N}), h_get_user_memories, LOW),
+    "suggest_meal": (_schema("suggest_meal", "Rank the user's recipes/saved meals against what's left of today's targets (use for 'what should I eat')", {}), h_suggest_meal, LOW),
     "search_recipes": (_schema("search_recipes", "Search the user's recipes", {"query": S, "limit": N}), h_search_recipes, LOW),
     "create_recipe": (_schema("create_recipe", "Create a recipe; nutrition per serving is computed by the system from ingredients", {
         "name": S, "description": S, "servings": N, "prep_minutes": N, "cook_minutes": N, "cuisine": S,

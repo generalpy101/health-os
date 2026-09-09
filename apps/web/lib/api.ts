@@ -150,7 +150,18 @@ const apiBase = {
   updateGoal: (id: string, b: Partial<Goal>) => patch<Goal>(`/goals/${id}`, b),
   deleteGoal: (id: string) => del(`/goals/${id}`),
   goalProgress: (id: string) =>
-    request<{ progress: number | null; current: number | null }>(`/goals/${id}/progress`),
+    request<{
+      progress: number | null; current: number | null;
+      forecast?: { target_date: string; days_left: number; needed_per_week: number;
+                   actual_per_week: number | null; projected_at_date: number | null; on_track: boolean };
+    }>(`/goals/${id}/progress`),
+  mealSuggestions: () =>
+    request<{
+      suggestions: { kind: string; id: string; name: string; calories: number; protein: number;
+                     coverage: number | null; reason: string }[];
+      remaining?: { calories: number | null; protein: number | null };
+      message?: string;
+    }>("/insights/meal-suggestions"),
   targets: () => request<Target[]>("/targets"),
   createTarget: (b: { key: string; value: number; unit: string; period?: string; mode?: string }) =>
     post<Target>("/targets", b),

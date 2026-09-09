@@ -7,7 +7,7 @@ import { TopBar } from "@/components/nav";
 import { Button, Card, CardTitle, PageLoading, ProgressBar, ProgressRing, Sheet, Stat } from "@/components/ui";
 import { api } from "@/lib/api";
 import type { DailySummary, Goal } from "@/lib/types";
-import { cx, fmtDuration, fmtMl, fmtNumber } from "@/lib/utils";
+import { cx, fmtDate, fmtDuration, fmtMl, fmtNumber } from "@/lib/utils";
 
 // Safe widget registry — dashboards are data, widgets come from here only.
 const WIDGETS = ["nutrition_rings", "water", "weight", "sleep", "workouts_week", "habits", "goals", "schedule_today", "recommendations"] as const;
@@ -298,6 +298,7 @@ function RecommendationsWidget() {
 
 function GoalRow({ goal }: { goal: Goal }) {
   const { data } = useQuery({ queryKey: ["goal-progress", goal.id], queryFn: () => api.goalProgress(goal.id) });
+  const f = data?.forecast;
   return (
     <li>
       <div className="mb-1 flex justify-between text-sm">
@@ -309,6 +310,19 @@ function GoalRow({ goal }: { goal: Goal }) {
         )}
       </div>
       {data?.progress != null && <ProgressBar value={data.progress} />}
+      {f && (
+        <div className="mt-1 flex items-center gap-2 text-[11px]">
+          <span className={cx("rounded px-1.5 py-0.5 font-bold uppercase tracking-wide",
+                              f.on_track ? "bg-olive-soft text-olive" : "bg-accent-soft text-accent")}>
+            {f.on_track ? "on track" : "behind"}
+          </span>
+          <span className="text-faint">
+            {f.days_left}d left · need {f.needed_per_week > 0 ? "+" : ""}{f.needed_per_week}{goal.unit}/wk
+            {f.actual_per_week != null && ` · at ${f.actual_per_week > 0 ? "+" : ""}${f.actual_per_week}/wk`}
+            {f.projected_at_date != null && ` → ~${f.projected_at_date}${goal.unit} by ${fmtDate(f.target_date)}`}
+          </span>
+        </div>
+      )}
     </li>
   );
 }

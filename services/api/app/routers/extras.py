@@ -72,3 +72,9 @@ async def activity_calendar(days: int = Query(default=180, le=400), user: User =
 @router.get("/insights/stall", response_model=StallOut)
 async def stall_check(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     return await insights_service.stall_check(db, user)
+
+
+@router.get("/insights/meal-suggestions")
+async def meal_suggestions(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    from ..services import suggest as suggest_service
+    return await suggest_service.meal_suggestions(db, user)

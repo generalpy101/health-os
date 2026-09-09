@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -50,6 +50,8 @@ async def delete_goal(db: AsyncSession, user: User, goal_id: UUID) -> None:
 
 
 async def goal_progress(db: AsyncSession, user: User, goal_id: UUID) -> dict:
+    from ..utils.time import user_today
+
     goal = await get_owned(db, Goal, goal_id, user)
     out: dict = {"goal_id": str(goal.id), "progress": None, "current": None}
     if goal.type in ("weight_loss", "weight_gain") and goal.unit in ("kg", "lb", None):
@@ -57,7 +59,34 @@ async def goal_progress(db: AsyncSession, user: User, goal_id: UUID) -> dict:
         if latest is not None:
             out["current"] = latest
             out["progress"] = metrics.goal_progress(goal.type, goal.start_value, goal.target_value, latest)
+
+        # deadline forecast: required pace vs actual pace, projection at the date
+        if goal.target_date and latest is not None:
+            today = user_today(user.timezone)
+            days_left = (goal.target_date - today).days
+            if days_left > 0 and goal.start_value is not None and goal.target_value is not None:
+                remaining_per_day = (goal.target_value - latest) / days_left
+                start = today - timedelta(days=30)
+                trend = await _weight_slope(db, user, start, today)
+                out["forecast"] = {
+                    "target_date": goal.target_date.isoformat(),
+                    "days_left": days_left,
+                    "needed_per_week": round(remaining_per_day * 7, 2),
+                    "actual_per_week": round(trend * 7, 2) if trend is not None else None,
+                    "projected_at_date": round(latest + trend * days_left, 1) if trend is not None else None,
+                    "on_track": (
+                        (trend is not None)
+                        and (trend * (goal.target_value - goal.start_value) >= remaining_per_day * (goal.target_value - goal.start_value))
+                    ),
+                }
     return out
+
+
+async def _weight_slope(db: AsyncSession, user: User, start: date, end: date) -> float | None:
+    from . import health as health_service
+
+    trend = await health_service.weight_trend(db, user, start, end)
+    return trend["slope_per_day"]
 
 
 # ---------- targets ----------
