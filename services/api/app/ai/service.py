@@ -15,11 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
-from ..models import AIAction, AIConversation, AIMessage, User, UserMemory, UserProfile
+from ..models import AIAction, AIConversation, AIMessage, User, UserMemory, UserPreference, UserProfile
 from ..services import analytics as analytics_service
 from ..services import goals as goals_service
 from ..utils.time import user_now
-from .provider import AIProvider, MockProvider
+from .provider import AIProvider, CliProvider, MockProvider
 from .registry import provider_for_user
 from .tools import REGISTRY, _s, execute_tool, tool_schemas
 
@@ -159,12 +159,35 @@ async def _chat_core(db: AsyncSession, user: User, message: str, conversation_id
         if on_trace is not None:
             await on_trace({**payload, "elapsed_s": round(time.perf_counter() - t0, 1)})
 
+    # --- CLI session continuity: resume the CLI's own session instead of
+    # replaying the whole conversation every call (claude: per-session ids;
+    # codex/opencode: resume-last guarded by last-used conversation) ---
+    cli_state: dict | None = None
+    if isinstance(provider, CliProvider):
+        cli_map = dict((conv.meta or {}).get("cli") or {})
+        saved = cli_map.get(provider.command)
+        if saved:
+            if provider.command == "claude":
+                cli_state = saved
+            else:
+                pref_row = (await db.execute(
+                    select(UserPreference).where(UserPreference.user_id == user.id))).scalar_one_or_none()
+                last_map = ((pref_row.data if pref_row else {}) or {}).get("cli_last") or {}
+                if last_map.get(provider.command) == str(conv.id):
+                    cli_state = saved
+
     async def call_provider() -> Any:
         """Run the provider with 5s heartbeat traces so slow CLIs show life."""
+        session_arg = None
+        msgs = messages
+        if cli_state is not None:
+            session_arg = cli_state.get("sid") or "resume"
+            msgs = messages[cli_state.get("sent", 0):] or messages[-1:]
+
         async def _call() -> Any:
             if on_delta is None:
-                return await provider.complete(messages, tools=tool_schemas())
-            return await provider.stream(messages, tools=tool_schemas(), on_delta=on_delta)
+                return await provider.complete(msgs, tools=tool_schemas(), session=session_arg)
+            return await provider.stream(msgs, tools=tool_schemas(), on_delta=on_delta, session=session_arg)
 
         task = asyncio.create_task(_call())
         while not task.done():
@@ -180,18 +203,43 @@ async def _chat_core(db: AsyncSession, user: User, message: str, conversation_id
         try:
             resp = await call_provider()
         except Exception as exc:
+            if cli_state is not None:
+                # resume can fail (session expired/CLI restarted) — retry once fresh
+                cli_state = None
+                try:
+                    resp = await call_provider()
+                except Exception as exc2:
+                    reply = (f"The AI provider is unavailable right now ({type(exc2).__name__}). "
+                             "You can still use every screen and log manually — nothing here depends on AI.")
+                    await trace({"kind": "error", "detail": type(exc2).__name__})
+                    break
+            else:
+                reply = (f"The AI provider is unavailable right now ({type(exc).__name__}). "
+                         "You can still use every screen and log manually — nothing here depends on AI.")
+                await trace({"kind": "error", "detail": type(exc).__name__})
+                break
             reply = (f"The AI provider is unavailable right now ({type(exc).__name__}). "
                      "You can still use every screen and log manually — nothing here depends on AI.")
             await trace({"kind": "error", "detail": type(exc).__name__})
             break
         await trace({"kind": "thought", "ms": int((time.perf_counter() - started) * 1000)})
+        if isinstance(provider, CliProvider):
+            if cli_state is None:
+                cli_state = {"sid": None, "sent": 0}
+            if resp.session_id:
+                cli_state["sid"] = resp.session_id
         if not resp.tool_calls:
             reply = resp.text or "Done."
+            if cli_state is not None:
+                cli_state["sent"] = len(messages)  # CLI transcript includes all of this
             break
         messages.append({"role": "assistant", "content": resp.text or "",
                          "tool_calls": [{"id": c.id, "type": "function",
                                          "function": {"name": c.name, "arguments": json.dumps(c.arguments)}}
                                         for c in resp.tool_calls]})
+        if cli_state is not None:
+            # CLI already knows its own reply; next resume only needs the tool results
+            cli_state["sent"] = len(messages)
         seen_calls: set[str] = set()
         for call in resp.tool_calls:
             # guard: skip exact duplicate tool invocations within one turn
@@ -228,6 +276,26 @@ async def _chat_core(db: AsyncSession, user: User, message: str, conversation_id
 
     db.add(AIMessage(conversation_id=conv.id, user_id=user.id, role="assistant", content=reply,
                      model=settings.ai_model))
+    if isinstance(provider, CliProvider) and cli_state is not None:
+        from sqlalchemy.orm.attributes import flag_modified
+
+        meta = dict(conv.meta or {})
+        cli_map = dict(meta.get("cli") or {})
+        cli_map[provider.command] = cli_state
+        meta["cli"] = cli_map
+        conv.meta = meta
+        flag_modified(conv, "meta")
+        if provider.command in ("codex", "opencode"):
+            # resume-last semantics stay valid only while this conv is the CLI's most recent
+            pref_row = (await db.execute(
+                select(UserPreference).where(UserPreference.user_id == user.id))).scalar_one_or_none()
+            if pref_row is not None:
+                data = dict(pref_row.data or {})
+                last = dict(data.get("cli_last") or {})
+                last[provider.command] = str(conv.id)
+                data["cli_last"] = last
+                pref_row.data = data
+                flag_modified(pref_row, "data")
     await db.commit()
     return conv, reply, actions
 

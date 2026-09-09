@@ -318,6 +318,8 @@ class AIConversation(TimestampMixin, Base):
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, sa.ForeignKey("users.id"), index=True)
     title: Mapped[str] = mapped_column(sa.String(200), default="Conversation")
+    # provider-side session binding: {"cli": {"claude": "<session-id>", "codex": "last", ...}}
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class AIMessage(Base):

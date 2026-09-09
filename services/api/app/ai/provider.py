@@ -30,19 +30,21 @@ class ProviderResponse:
     tool_calls: list[ToolCall] = field(default_factory=list)
     model: str = ""
     usage: dict[str, int] = field(default_factory=dict)
+    session_id: str | None = None  # CLI providers: the session the CLI created/resumed
 
 
 class AIProvider:
     name = "base"
 
-    async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> ProviderResponse:
+    async def complete(self, messages: list[dict], tools: list[dict] | None = None,
+                       session: str | None = None) -> ProviderResponse:
         raise NotImplementedError
 
     async def stream(self, messages: list[dict], tools: list[dict] | None = None,
-                     on_delta: OnDelta | None = None) -> ProviderResponse:
+                     on_delta: OnDelta | None = None, session: str | None = None) -> ProviderResponse:
         """Streaming default: providers without a streaming mode emit the full
         reply as a single delta (mock/cli rely on this)."""
-        resp = await self.complete(messages, tools=tools)
+        resp = await self.complete(messages, tools=tools, session=session)
         if resp.text and on_delta is not None:
             await on_delta(resp.text)
         return resp
@@ -344,7 +346,8 @@ FINAL_REPLIES = {
 class MockProvider(AIProvider):
     name = "mock"
 
-    async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> ProviderResponse:
+    async def complete(self, messages: list[dict], tools: list[dict] | None = None,
+                       session: str | None = None) -> ProviderResponse:
         # second pass: tools already ran — produce the final natural-language reply
         if messages and messages[-1].get("role") == "tool":
             trailing = []
@@ -387,7 +390,8 @@ class OpenAICompatibleProvider(AIProvider):
         self.api_key = api_key if api_key is not None else s.ai_api_key
         self.model = model or s.ai_model
 
-    async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> ProviderResponse:
+    async def complete(self, messages: list[dict], tools: list[dict] | None = None,
+                       session: str | None = None) -> ProviderResponse:
         payload: dict[str, Any] = {"model": self.model, "messages": messages}
         if tools:
             payload["tools"] = [
@@ -497,33 +501,59 @@ CONVERSATION:
 CLITimeout = 150  # seconds
 
 
+CONTINUATION_PROMPT = """(Continuing your HealthOS assistant session — tools and rules unchanged.
+Respond with ONLY the same minified JSON object: {"reply": str, "tool_calls": [...]}.)
+
+NEW INPUT:
+%s
+"""
+
+
 class CliProvider(AIProvider):
+    """Local agent CLIs, optionally session-backed.
+
+    session=None        -> fresh CLI session, full contract + conversation
+    session=<id>        -> resume; `messages` must be only the NEW tail
+    Claude resumes by session id (from its JSON envelope); codex/opencode resume
+    their most recent session (callers only pass a session when this conversation
+    was the last one run on that CLI, so contexts never cross).
+    """
+
     name = "cli"
 
     def __init__(self, command: str, model: str | None = None) -> None:
         self.command = command
         self.model = model or ""
 
-    def _argv(self, prompt: str) -> list[str]:
+    def _argv(self, prompt: str, session: str | None) -> list[str]:
         if self.command == "claude":
             argv = ["claude", "-p", prompt, "--output-format", "json"]
+            if session:
+                argv += ["--resume", session]
             if self.model:
                 argv += ["--model", self.model]
             return argv
         if self.command == "codex":
-            argv = ["codex", "exec", "--skip-git-repo-check"]
+            if session:
+                # non-interactive resume (bare `codex resume` needs a TTY)
+                argv = ["codex", "exec", "resume", "--last", "--skip-git-repo-check", prompt]
+            else:
+                argv = ["codex", "exec", "--skip-git-repo-check", prompt]
+                if self.model:
+                    argv += ["-m", self.model]
+            return argv
+        if self.command == "opencode":
+            argv = ["opencode", "run"]
+            if session:
+                argv += ["--continue"]
             if self.model:
                 argv += ["-m", self.model]
             argv.append(prompt)
             return argv
-        if self.command == "opencode":
-            argv = ["opencode", "run", prompt]
-            if self.model:
-                argv += ["-m", self.model]
-            return argv
         return [self.command, prompt]
 
-    async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> ProviderResponse:
+    async def complete(self, messages: list[dict], tools: list[dict] | None = None,
+                       session: str | None = None) -> ProviderResponse:
         convo = []
         for m in messages:
             role = m.get("role", "user")
@@ -531,34 +561,50 @@ class CliProvider(AIProvider):
                 convo.append(f"TOOL[{m.get('name', 'tool')}] RESULT: {m.get('content', '')}")
             elif role in ("user", "assistant"):
                 convo.append(f"{role.upper()}: {m.get('content', '')}")
-        compact_tools = json.dumps(
-            [{"name": t["name"], "description": t["description"], "schema": t["input_schema"]}
-             for t in (tools or [])],
-            separators=(",", ":"),
-        )
-        prompt = CLI_JSON_CONTRACT % (compact_tools, "\n\n".join(convo[-24:]))
+            elif role == "system" and not session:
+                convo.append(f"SYSTEM: {m.get('content', '')}")
+        if session:
+            prompt = CONTINUATION_PROMPT % ("\n\n".join(convo[-12:]) or "(no new input)")
+        else:
+            compact_tools = json.dumps(
+                [{"name": t["name"], "description": t["description"], "schema": t["input_schema"]}
+                 for t in (tools or [])],
+                separators=(",", ":"),
+            )
+            prompt = CLI_JSON_CONTRACT % (compact_tools, "\n\n".join(convo[-24:]))
+
+        session_out: str | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
-                *self._argv(prompt),
+                *self._argv(prompt, session),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=tempfile.gettempdir(),
             )
-            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=CLITimeout)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=CLITimeout)
         except FileNotFoundError:
             raise RuntimeError(f"CLI not installed on server: {self.command}")
         except asyncio.TimeoutError:
             raise RuntimeError(f"{self.command} timed out after {CLITimeout}s")
 
         text = stdout.decode(errors="replace").strip()
+        if not text:
+            err_tail = stderr.decode(errors="replace").strip().splitlines()
+            detail = err_tail[-1][:200] if err_tail else f"exit code {proc.returncode}"
+            raise RuntimeError(f"{self.command} returned nothing: {detail}")
         if self.command == "claude":
             try:
                 envelope = json.loads(text)
+                session_out = envelope.get("session_id") or None
                 text = envelope.get("result", text)
             except json.JSONDecodeError:
                 pass
-        return self._parse(text)
+        elif session:
+            session_out = session  # codex/opencode: the resumed marker stays valid
+        resp = self._parse(text)
+        resp.session_id = session_out
+        return resp
 
     @staticmethod
     def _parse(text: str) -> ProviderResponse:
