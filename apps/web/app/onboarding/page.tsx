@@ -11,7 +11,7 @@ import { useQueryClient } from "@tanstack/react-query";
 const EXAMPLE = "I want to lose fat, keep muscle, train four times a week, swim twice a week, eat mostly home-cooked food, and I work from 10 to 7.";
 
 type EditableProposal = OnboardingProposal & {
-  events: { type: string; title: string; bydays?: number[]; hour?: number; end_hour?: number }[];
+  events: { type: string; title: string; bydays?: number[]; hour?: number; minute?: number; end_hour?: number }[];
 };
 
 /** LLMs and fallbacks can both drop keys — never trust the shape. */
@@ -83,9 +83,10 @@ export default function OnboardingPage() {
       const events = (proposal.events || []).map((e) => {
         if (!e.bydays?.length) return null;
         const start = new Date(now);
-        start.setHours(e.hour ?? 18, 0, 0, 0);
+        start.setHours(e.hour ?? 18, e.minute ?? 0, 0, 0);
         const end = new Date(start);
-        end.setHours(e.end_hour ?? (e.hour ?? 18) + 1);
+        end.setHours(e.end_hour ?? (e.hour ?? 18) + 1, e.minute ?? 0, 0, 0);
+        if (end <= start) end.setDate(end.getDate() + 1); // overnight (e.g. night-shift work)
         return {
           type: e.type, title: e.title,
           start_at: start.toISOString(), end_at: end.toISOString(),

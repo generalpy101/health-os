@@ -71,6 +71,21 @@ async def _generate_review(db: AsyncSession, job: BackgroundJob) -> None:
     await reviews_service.run_generate_review(db, user, job.payload.get("kind", "weekly"))
 
 
+@handler("extract_observations")
+async def _extract_observations(db: AsyncSession, job: BackgroundJob) -> None:
+    """Daily: mine behavior patterns into memory records for every user, then
+    self-enqueue tomorrow's run (same chain pattern as check_reminders)."""
+    from .services import observations as observations_service
+
+    user_ids = (await db.execute(select(User.id))).scalars().all()
+    for uid in user_ids:
+        user = await db.get(User, uid)
+        if user is not None:
+            await observations_service.extract_observations(db, user)
+    await enqueue(db, "extract_observations", {}, run_at=datetime.now(timezone.utc) + timedelta(hours=24))
+    await db.commit()
+
+
 @handler("onboarding_parse")
 async def _onboarding_parse(db: AsyncSession, job: BackgroundJob) -> None:
     """Long-running onboarding extraction (CLI/hosted LLMs can take 30-60s).
@@ -130,14 +145,16 @@ async def _check_reminders(db: AsyncSession, job: BackgroundJob) -> None:
 
 
 async def _ensure_reminder_job(db: AsyncSession) -> None:
-    """Backstop: guarantee a pending/running check_reminders chain exists."""
-    existing = (await db.execute(
-        select(BackgroundJob.id).where(BackgroundJob.kind == "check_reminders",
-                                       BackgroundJob.status.in_(("pending", "running"))).limit(1)
-    )).first()
-    if existing is None:
-        await enqueue(db, "check_reminders", {"sent": {}})
-        await db.commit()
+    """Backstop: guarantee pending/running chains exist for the recurring jobs."""
+    for kind, delay in (("check_reminders", None), ("extract_observations", timedelta(hours=24))):
+        existing = (await db.execute(
+            select(BackgroundJob.id).where(BackgroundJob.kind == kind,
+                                           BackgroundJob.status.in_(("pending", "running"))).limit(1)
+        )).first()
+        if existing is None:
+            await enqueue(db, kind, {"sent": {}} if kind == "check_reminders" else {},
+                          run_at=datetime.now(timezone.utc) + delay if delay else None)
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------

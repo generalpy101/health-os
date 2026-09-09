@@ -256,6 +256,22 @@ async def h_create_memory(db, user, args):
     return {"created": _obj(mem, ["id", "type", "key", "value"])}
 
 
+async def h_search_recipes(db, user, args):
+    from ..services import recipes as recipes_service
+    rs = await recipes_service.list_recipes(db, user, args.get("query", ""), limit=int(args.get("limit", 8)))
+    return {"recipes": [{"id": str(r.id), "name": r.name, "servings": r.servings,
+                         "per_serving": (r.nutrition or {}).get("per_serving", {}),
+                         "tags": r.tags, "cuisine": r.cuisine} for r in rs]}
+
+
+async def h_create_recipe(db, user, args):
+    from ..schemas import RecipeIn
+    from ..services import recipes as recipes_service
+    r = await recipes_service.create_recipe(db, user, RecipeIn(**args), source="ai")
+    return {"created": {"id": str(r.id), "name": r.name, "servings": r.servings,
+                        "nutrition_per_serving": (r.nutrition or {}).get("per_serving", {})}}
+
+
 async def h_get_user_memories(db, user, args):
     result = await db.execute(
         select(UserMemory).where(UserMemory.user_id == user.id, UserMemory.status == "active")
@@ -333,6 +349,13 @@ REGISTRY: dict[str, tuple[dict, Handler, str]] = {
     "create_memory": (_schema("create_memory", "Remember a user preference or fact", {
         "type": S, "key": S, "value": S, "confidence": N}, ["key", "value"]), h_create_memory, LOW),
     "get_user_memories": (_schema("get_user_memories", "Retrieve remembered preferences/facts", {"limit": N}), h_get_user_memories, LOW),
+    "search_recipes": (_schema("search_recipes", "Search the user's recipes", {"query": S, "limit": N}), h_search_recipes, LOW),
+    "create_recipe": (_schema("create_recipe", "Create a recipe; nutrition per serving is computed by the system from ingredients", {
+        "name": S, "description": S, "servings": N, "prep_minutes": N, "cook_minutes": N, "cuisine": S,
+        "tags": {"type": "array", "items": S}, "steps": {"type": "array", "items": S},
+        "ingredients": {"type": "array", "items": {"type": "object", "properties": {
+            "food_id": S, "name": S, "quantity": N, "unit": S}, "required": ["name", "quantity"]}}},
+        ["name", "ingredients"]), h_create_recipe, LOW),
 }
 
 

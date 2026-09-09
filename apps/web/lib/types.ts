@@ -292,7 +292,7 @@ export interface OnboardingProposal {
   goals: { type: string; title: string; start_value?: number; target_value?: number; unit?: string }[];
   targets: { key: string; value: number; unit: string; period: string; source?: string; reason?: string }[];
   suggested_targets?: { key: string; value: number; unit: string; period: string; source?: string; reason?: string }[];
-  events: { type: string; title: string; bydays?: number[]; hour?: number; end_hour?: number }[];
+  events: { type: string; title: string; bydays?: number[]; hour?: number; minute?: number; end_hour?: number }[];
   workout_plan?: { name: string; days: { name: string; exercises: { name: string; sets?: number; reps?: number }[] }[] } | null;
   memories: { type: string; key: string; value: string }[];
 }

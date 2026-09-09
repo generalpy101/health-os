@@ -220,25 +220,25 @@ NUMBER_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "fiv
                 "six": 6, "seven": 7, "twice": 2, "thrice": 3}
 
 
-ONBOARDING_PROMPT = """You are setting up a personal health OS for a new user. Read their description and return ONLY minified JSON with this shape:
+ONBOARDING_PROMPT = """You are setting up a personal health OS for a new user. Read their description carefully and return ONLY minified JSON with this exact shape:
 {"profile": {"age": number?, "height_cm": number?, "weight_kg": number?, "sex": "male|female"?, "activity_level": "sedentary|light|moderate|active|very_active"?},
- "goals": [{"type": "weight_loss|weight_gain|maintenance|muscle_gain|strength|endurance|fitness|sleep|hydration|habit|nutrition|activity|sport|custom", "title": str, "start_value": number?, "target_value": number?, "unit": str?}],
- "targets": [{"key": "workouts|swimming|steps|sleep_minutes", "value": number, "unit": str, "period": "daily|weekly"}],
- "events": [{"type": "workout|swimming|work|sleep|meal|custom", "title": str, "bydays": [0-6, Monday=0], "hour": 0-23, "end_hour": 0-23?}],
+ "goals": [{"type": "weight_loss|weight_gain|maintenance|muscle_gain|strength|endurance|fitness|sleep|hydration|habit|nutrition|activity|sport|custom", "title": str, "start_value": number?, "target_value": number?, "unit": str?, "target_date": "YYYY-MM-DD"?}],
+ "targets": [{"key": "calories|protein|water|steps|sleep_minutes|workouts|swimming", "value": number, "unit": str, "period": "daily|weekly", "mode": "minimum|range"?, "range_low": number?, "range_high": number?}],
+ "events": [{"type": "workout|swimming|work|sleep|meal|custom", "title": str, "bydays": [0-6, Monday=0], "hour": 0-23, "minute": 0-59?, "end_hour": 0-23?}],
  "workout_plan": {"name": str, "days": [{"name": str, "exercises": [{"name": str, "sets": number, "reps": number}]}]}?,
+ "habits": [{"name": str}?,
  "memories": [{"type": "fact|preference", "key": snake_case, "value": str}],
  "dietary": {"diet": str?, "dislikes": [str]}}
 
-Rules:
-- Only include what the text supports. NEVER invent body stats or calorie numbers — calorie/protein
-  targets are computed deterministically by the system from the profile you extract, so omit "calories"
-  and "protein" targets entirely.
-- Map current body weight to BOTH profile.weight_kg and the weight goal's start_value.
-- If they state a training frequency (e.g. "train 4 times a week"), include a workout_plan: a sensible
-  split for that frequency (2-3 days → full body; 4 → upper/lower; 5-6 → push/pull/legs variants) using
-  basic compound exercises (squat, bench/press, row, overhead press, plank), 3 sets of 8-12 each.
-- Schedule events should reflect their stated schedule: workouts on spread weekdays at their preferred
-  time (default 18:00), work block weekdays if hours are given.
+Extraction rules:
+- Only include what the text supports. Map current body weight to BOTH profile.weight_kg and the weight goal's start_value. If they give a goal deadline/date, set target_date.
+- If they state explicit calorie/protein numbers (even as a range like "1900–2000 kcal" or "120–140g protein"), include them as user targets (value = lower bound; mode "range" with range_low/range_high when a range). The system never overrides explicitly stated numbers.
+- Training frequency → workouts weekly target (range like "3–4 times" → lower bound) + workout_plan with a sensible split (2-3 days → full body; 4 → upper/lower; 5-6 → push/pull/legs variants) of basic compound exercises, 3×8-12 each.
+- Steps per day (range → lower bound), water, sleep duration → sleep_minutes (default 480 when they only mention bedtime).
+- Schedule MUST respect their actual rhythm, not a 9–5 assumption: night-shift work blocks, late gym times, sleep events at their stated bedtime. Spread training across the week with rest days between hard days.
+- Memories: meal structure (e.g. "2 meals + 1-2 protein snacks"), cuisine, staple preferences (rice over roti), equipment (induction, air fryer…), supplements they already take (creatine, protein powder with g/scoop if stated), chronotype, wake/bed times, cooking time limits, girlfriend/schedule constraints worth remembering.
+- Habits for daily supplement use (e.g. "Take creatine").
+- Dietary: diet type + dislikes ONLY when they explicitly say they don't eat/avoid something.
 
 USER TEXT:
 %s"""
@@ -274,7 +274,7 @@ async def _parse_onboarding_llm(provider: AIProvider, text: str) -> dict | None:
             "targets": [t for t in data.get("targets", []) if isinstance(t, dict) and t.get("key") and t.get("value")],
             "events": [e for e in data.get("events", []) if isinstance(e, dict) and e.get("title")],
             "workout_plan": data.get("workout_plan") if isinstance(data.get("workout_plan"), dict) else None,
-            "habits": [],
+            "habits": [h for h in data.get("habits", []) if isinstance(h, dict) and h.get("name")],
             "memories": [m for m in data.get("memories", []) if isinstance(m, dict) and m.get("key")],
         })
     except Exception:
@@ -371,9 +371,9 @@ def _parse_onboarding_keywords(text: str) -> dict:
     memories: list[dict] = []
     dietary: dict = {}
 
-    # body stats: "25 yo", "173 cm", "82 kg", "male/female"
+    # body stats: "25 yo", "24-year-old", "173 cm", "82 kg", "male/female"
     age = None
-    m_age = re.search(r"(\d{2})\s*(?:\s*yo\b|years?\s*old|y/?o\b)", t)
+    m_age = re.search(r"(\d{2})\s*(?:-?\s*(?:yo\b|y/?o\b|years?[-\s]old))", t)
     if m_age:
         age = int(m_age.group(1))
     height_cm = None
@@ -413,37 +413,141 @@ def _parse_onboarding_keywords(text: str) -> dict:
         goals_out[0].update({"start_value": float(m.group(1)), "target_value": float(m.group(2)), "unit": "kg"})
         weight_kg = float(m.group(1))  # "from 82 to 74" → current weight is 82
 
-    # training frequency
-    m = re.search(r"train(?:ing)?\s+(\w+)\s*(?:times?|days?)\s+a\s+week", t)
-    if m:
-        n = NUMBER_WORDS.get(m.group(1), 4)
-        targets.append({"key": "workouts", "value": n, "unit": "sessions", "period": "weekly", "mode": "minimum"})
-        days = [0, 2, 4, 6, 1, 3, 5][:n]
+    # training frequency: "train four times a week", "gym 3–4 times per week", "gym 3 times a week"
+    def _weekly_freq(patterns: list[str]) -> int | None:
+        for pat in patterns:
+            m = re.search(pat, t)
+            if not m:
+                continue
+            g = m.group(1)
+            if g.isdigit():
+                # range "3–4" → take the lower bound as the sustainable minimum
+                lo = g
+                return int(lo)
+            return NUMBER_WORDS.get(g)
+        return None
+
+    n_gym = _weekly_freq([
+        r"(?:train(?:ing)?|gym|work\s*out|lift)[a-z\s]*?(\d)\s*(?:–|-|to)\s*\d\s*times?\s*(?:per|a)\s*week",
+        r"(?:train(?:ing)?|gym|work\s*out|lift)[a-z\s]*?(\w+)\s*(?:(?:times?|days?)\s*)?(?:per|a)\s*week",
+    ])
+    if n_gym:
+        targets.append({"key": "workouts", "value": n_gym, "unit": "sessions", "period": "weekly", "mode": "minimum"})
+        days = [0, 2, 4, 6, 1, 3, 5][:n_gym]
         events.append({"type": "workout", "title": "Gym session", "bydays": sorted(days), "hour": 18})
-    m = re.search(r"swim(?:ming)?\s+(\w+)\s*(?:times?|days?)?\s*a\s+week", t)
-    if m:
-        n = NUMBER_WORDS.get(m.group(1), 2)
-        targets.append({"key": "swimming", "value": n, "unit": "sessions", "period": "weekly", "mode": "minimum"})
-        days = [1, 5, 3][:n]
+    n_swim = _weekly_freq([
+        r"swim(?:ming)?[a-z\s]*?(\d)\s*(?:–|-|to)\s*\d\s*times?\s*(?:per|a)\s*week",
+        r"swim(?:ming)?[a-z\s]*?(\w+)\s*(?:(?:times?|days?)\s*)?(?:per|a)\s*week",
+    ])
+    if n_swim:
+        targets.append({"key": "swimming", "value": n_swim, "unit": "sessions", "period": "weekly", "mode": "minimum"})
+        days = [1, 5, 3][:n_swim]
         events.append({"type": "swimming", "title": "Swimming", "bydays": sorted(days), "hour": 7})
 
-    # work schedule
-    m = re.search(r"work(?:ing)?\s+(?:from\s+)?(\d{1,2})(?:\s*(?:am|pm))?\s*(?:to|until|-)\s*(\d{1,2})(?:\s*(?:am|pm))?", t)
-    if m:
-        h1, h2 = int(m.group(1)), int(m.group(2))
-        h1 = h1 if h1 >= 7 else h1 + 12
-        h2 = h2 if h2 > h1 else h2 + 12
-        events.append({"type": "work", "title": "Work", "bydays": [0, 1, 2, 3, 4],
-                       "hour": h1 % 24, "end_hour": h2 % 24})
+    # steps: "7,000–10,000 steps per day" → lower bound as the daily minimum
+    m_steps = re.search(r"([\d,]{4,})\s*(?:–|-|to)\s*([\d,]{4,})\s*steps", t) or re.search(r"([\d,]{4,})\s*steps", t)
+    if m_steps:
+        steps = int(m_steps.group(1).replace(",", ""))
+        targets.append({"key": "steps", "value": steps, "unit": "steps", "period": "daily", "mode": "minimum"})
 
-    # diet
+    # explicit nutrition targets win over computed suggestions:
+    # "start around 1,900–2,000 calories", "aim for 120–140g of protein"
+    m_cal = re.search(r"([\d,]{4,})\s*(?:–|-|to)\s*([\d,]{4,})\s*(?:kcal|calories)\b", t) or \
+        re.search(r"(?:around|about|~)?\s*([\d,]{4,})\s*(?:kcal|calories)\b", t)
+    if m_cal:
+        lo = int(m_cal.group(1).replace(",", ""))
+        hi = int(m_cal.group(2).replace(",", "")) if m_cal.lastindex and m_cal.lastindex >= 2 else None
+        targets.append({"key": "calories", "value": lo, "unit": "kcal", "period": "daily",
+                        "mode": "range" if hi else "minimum",
+                        **({"range_low": lo, "range_high": hi} if hi else {}),
+                        "source": "user", "reason": "stated in your setup"})
+    m_pro = re.search(r"(\d{2,3})\s*(?:–|-|to)\s*(\d{2,3})\s*g\s*(?:of\s*)?protein", t) or \
+        re.search(r"(\d{2,3})\s*g\s*(?:of\s*)?protein", t)
+    if m_pro:
+        lo = int(m_pro.group(1))
+        hi = int(m_pro.group(2)) if m_pro.lastindex and m_pro.lastindex >= 2 else None
+        targets.append({"key": "protein", "value": lo, "unit": "g", "period": "daily",
+                        "mode": "range" if hi else "minimum",
+                        **({"range_low": lo, "range_high": hi} if hi else {}),
+                        "source": "user", "reason": "stated in your setup"})
+
+    # work schedule: "work from 10 to 7", "work from around 10:30 PM until the morning"
+    m = re.search(r"work(?:ing)?\s+(?:from\s+)?(?:around\s+|about\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:to|until|-)\s*(?:the\s+morning|(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)", t)
+    if m:
+        h1 = int(m.group(1)) % 24
+        if (m.group(3) == "pm" or (m.group(3) is None and h1 < 7)) and h1 < 12:
+            h1 += 12
+        if m.group(4):
+            h2 = int(m.group(4)) % 24
+            if (m.group(6) == "pm" or m.group(6) is None) and h2 < 12:
+                h2 += 12
+            if h2 <= h1:
+                h2 = (h2 + 12) % 24 or 6
+        else:
+            h2 = 6  # "until the morning"
+        events.append({"type": "work", "title": "Work", "bydays": [0, 1, 2, 3, 4],
+                       "hour": h1, "minute": int(m.group(2) or 0), "end_hour": h2})
+
+    # diet — only extract from a known food/allergen vocabulary; never guess from grammar
     if re.search(r"vegetarian", t):
         dietary["diet"] = "vegetarian"
     if re.search(r"vegan", t):
         dietary["diet"] = "vegan"
-    for dislike in re.findall(r"(?:don't|do not|no)\s+(?:eat\s+)?(\w+(?:\s\w+)?)", t):
-        if dislike not in ("like", "want"):
-            dietary.setdefault("dislikes", []).append(dislike)
+    KNOWN_DISLIKES = ["seafood", "fish", "dairy", "milk", "nuts", "peanuts", "gluten", "eggs",
+                      "soy", "spicy food", "pork", "beef", "shellfish", "mushrooms"]
+    for food in KNOWN_DISLIKES:
+        if re.search(rf"(?:don't|do not|don't|no|dislike|hate|avoid|allergic\w*\s+to)\s+\w*\s*{re.escape(food)}\b", t):
+            dietary.setdefault("dislikes", []).append(food)
+
+    # meal structure / preferences
+    m_meals = re.search(r"[^.]*(?:meals?\s+(?:per|a)\s+day|protein[-\s]focused\s+snacks?)[^.]*", t)
+    if m_meals and re.search(r"meals?", m_meals.group(0)):
+        memories.append({"type": "preference", "key": "meal_structure",
+                         "value": re.sub(r"\s+", " ", m_meals.group(0)).strip()[:160]})
+    if re.search(r"under\s+(\d+)\s*min", t):
+        memories.append({"type": "preference", "key": "max_cook_minutes",
+                         "value": re.search(r"under\s+(\d+)\s*min", t).group(1)})
+    if re.search(r"rice over roti|prefer rice|prefers rice", t):
+        memories.append({"type": "preference", "key": "staple_preference", "value": "rice"})
+    if re.search(r"indian", t):
+        memories.append({"type": "preference", "key": "cuisine", "value": "Indian home-cooked"})
+
+    # supplements → habits + memories (so the AI accounts for them instead of re-recommending)
+    if re.search(r"creatine", t):
+        habits_out.append({"name": "Take creatine"})
+        memories.append({"type": "fact", "key": "supplement", "value": "creatine"})
+    m_protein_powder = re.search(r"([\w\s-]*?protein powder)[^.]*?(\d+)\s*g\s*protein\s+per\s+scoop", t)
+    if m_protein_powder:
+        memories.append({"type": "fact", "key": "protein_powder",
+                         "value": f"{m_protein_powder.group(1).strip()}, ~{m_protein_powder.group(2)}g protein per scoop"})
+    elif re.search(r"protein (powder|shake)", t):
+        memories.append({"type": "fact", "key": "protein_powder", "value": "uses protein powder"})
+
+    # equipment available (normalized; "airfryer" and "air fryer" are one thing)
+    EQUIP_ALIASES = {"airfryer": "air fryer"}
+    equipment = set()
+    t_flat = t.replace(" ", "")
+    for e in ["induction", "air fryer", "airfryer", "oven", "microwave", "blender", "gym", "pool"]:
+        if e.replace(" ", "") in t_flat:
+            equipment.add(EQUIP_ALIASES.get(e, e))
+    if equipment:
+        memories.append({"type": "fact", "key": "kitchen_equipment", "value": ", ".join(sorted(equipment))})
+
+    # chronotype / sleep times
+    if re.search(r"night[- ]?(owl|oriented)|late/night|late nights|work late", t):
+        memories.append({"type": "preference", "key": "chronotype", "value": "night-oriented"})
+    m_sleep = re.search(r"sleep\s+(?:around\s+)?(\d{1,2})(?:\s*(?:–|-|to)\s*(\d{1,2}))?\s*(am|pm)", t)
+    if m_sleep:
+        h = int(m_sleep.group(1)) % 12
+        if m_sleep.group(3) == "pm":
+            h += 12
+        memories.append({"type": "preference", "key": "usual_bedtime", "value": f"~{h}:00"})
+    m_wake = re.search(r"wake\s+up\s+around\s+(\d{1,2})\s*(am|pm)?", t)
+    if m_wake:
+        h = int(m_wake.group(1)) % 12
+        if m_wake.group(2) == "pm" or (m_wake.group(2) is None and h < 7):
+            h += 12
+        memories.append({"type": "preference", "key": "usual_wake", "value": f"~{h}:00"})
     if re.search(r"home.?cooked|home cooking|cook at home", t):
         memories.append({"type": "preference", "key": "meal_source", "value": "home-cooked"})
     if re.search(r"simple (meals|food|recipes)|quick meals|easy recipes", t):
