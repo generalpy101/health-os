@@ -21,6 +21,8 @@ class Settings(BaseSettings):
 
     seed_on_startup: bool = True
 
+    usda_api_key: str = ""  # TRACK A — USDA FoodData Central; provider skipped when unset
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,19 +1,22 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, Trash2 } from "lucide-react";
+import { Camera, Globe, Plus, ScanBarcode, Search, Trash2, Upload } from "lucide-react";
 import { useState } from "react";
 import { TopBar } from "@/components/nav";
+import { BarcodeScanner } from "@/components/barcode-scanner";
 import {
   Button, Card, CardTitle, Empty, Field, Input, PageLoading, Select, Sheet, Spinner, useToast,
 } from "@/components/ui";
 import { api } from "@/lib/api";
 import type { Food } from "@/lib/types";
 import { MEAL_TYPES, cx, fmtNumber, todayISO } from "@/lib/utils";
+import { ImportSheet } from "./import-sheet";
 
 export default function NutritionPage() {
   const [day, setDay] = useState(todayISO());
   const [logOpen, setLogOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ["nutrition", day],
     queryFn: () => api.dailyNutrition(day),
@@ -107,10 +110,26 @@ export default function NutritionPage() {
                 </Card>
               ))
             )}
+
+            <Card>
+              <CardTitle
+                right={
+                  <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
+                    <Upload size={14} /> Import
+                  </Button>
+                }
+              >
+                Import data
+              </CardTitle>
+              <p className="text-sm text-muted">
+                Bring in measurements, food logs or workouts from a CSV or JSON export.
+              </p>
+            </Card>
           </>
         )}
       </main>
       <LogFoodSheet open={logOpen} onClose={() => setLogOpen(false)} day={day} />
+      <ImportSheet open={importOpen} onClose={() => setImportOpen(false)} />
     </>
   );
 }
@@ -118,15 +137,32 @@ export default function NutritionPage() {
 function LogFoodSheet({ open, onClose, day }: { open: boolean; onClose: () => void; day: string }) {
   const [meal, setMeal] = useState<string>("lunch");
   const [query, setQuery] = useState("");
+  const [online, setOnline] = useState(false);
+  const [barcodeOpen, setBarcodeOpen] = useState(false);
+  const [barcode, setBarcode] = useState("");
+  const [scanning, setScanning] = useState(false);
   const [picked, setPicked] = useState<{ food: Food; quantity: number }[]>([]);
   const [customName, setCustomName] = useState("");
   const queryClient = useQueryClient();
   const toast = useToast();
 
   const { data: results, isFetching } = useQuery({
-    queryKey: ["foods", query],
-    queryFn: () => api.searchFoods(query, 12),
+    queryKey: ["foods", query, online],
+    queryFn: () => (online ? api.searchFoodsProvider(query, 12, "auto") : api.searchFoods(query, 12)),
     enabled: open,
+  });
+
+  const lookupBarcode = useMutation({
+    mutationFn: (code: string) => api.foodByBarcode(code.trim()),
+    onSuccess: (food) => {
+      setPicked((prev) =>
+        prev.find((p) => p.food.id === food.id) ? prev : [...prev, { food, quantity: food.serving_size }]);
+      toast(`${food.name} added`);
+      setBarcode("");
+      setScanning(false);
+      setBarcodeOpen(false);
+    },
+    onError: (e) => toast(e.message === "not found" ? "Barcode not found — try online search" : e.message, "err"),
   });
 
   const save = useMutation({
@@ -179,11 +215,68 @@ function LogFoodSheet({ open, onClose, day }: { open: boolean; onClose: () => vo
           </div>
         </Field>
 
-        <div className="relative">
-          <Search size={16} className="absolute left-3.5 top-3.5 text-faint" />
-          <Input className="pl-10" placeholder="Search foods — rice, eggs, chicken…" value={query}
-                 onChange={(e) => setQuery(e.target.value)} autoFocus />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search size={16} className="absolute left-3.5 top-3.5 text-faint" />
+            <Input className="pl-10" placeholder="Search foods — rice, eggs, chicken…" value={query}
+                   onChange={(e) => setQuery(e.target.value)} autoFocus />
+          </div>
+          <Button
+            variant="outline"
+            className={cx("h-11 w-11 shrink-0 px-0", barcodeOpen && "border-accent text-accent")}
+            onClick={() => setBarcodeOpen(!barcodeOpen)}
+            aria-label="Look up barcode"
+          >
+            <ScanBarcode size={18} />
+          </Button>
         </div>
+
+        <button
+          onClick={() => setOnline(!online)}
+          className={cx(
+            "flex items-center gap-1.5 text-xs font-medium transition-colors",
+            online ? "text-accent" : "text-faint hover:text-muted"
+          )}
+        >
+          <Globe size={13} /> Search online too{online ? " · on (USDA, OpenFoodFacts)" : ""}
+        </button>
+
+        {barcodeOpen && (
+          <div className="space-y-2 rounded-xl border border-line bg-surface-2/50 p-3">
+            <div className="flex gap-2">
+              <Input
+                className="h-9 text-sm"
+                placeholder="Type or paste barcode…"
+                inputMode="numeric"
+                value={barcode}
+                onChange={(e) => setBarcode(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && barcode.trim() && lookupBarcode.mutate(barcode)}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-9 shrink-0"
+                disabled={!barcode.trim() || lookupBarcode.isPending}
+                onClick={() => lookupBarcode.mutate(barcode)}
+              >
+                {lookupBarcode.isPending ? "…" : "Look up"}
+              </Button>
+            </div>
+            {scanning ? (
+              <BarcodeScanner
+                onResult={(code) => { setBarcode(code); setScanning(false); lookupBarcode.mutate(code); }}
+                onError={() => setScanning(false)}
+              />
+            ) : (
+              <button
+                onClick={() => setScanning(true)}
+                className="flex items-center gap-1.5 text-xs font-medium text-muted hover:text-ink"
+              >
+                <Camera size={13} /> Scan with camera
+              </button>
+            )}
+          </div>
+        )}
 
         {isFetching && <Spinner className="mx-auto" />}
         <div className="max-h-56 space-y-1 overflow-y-auto">
@@ -197,8 +290,15 @@ function LogFoodSheet({ open, onClose, day }: { open: boolean; onClose: () => vo
               }}
               className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm hover:bg-surface-2"
             >
-              <span className="font-medium">{food.name}</span>
-              <span className="text-xs text-muted">
+              <span className="flex min-w-0 items-center font-medium">
+                <span className="truncate">{food.name}</span>
+                {(food.source === "usda" || food.source === "openfoodfacts") && (
+                  <span className="ml-2 shrink-0 rounded-md bg-gold-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gold">
+                    {food.source === "usda" ? "USDA" : "OpenFoodFacts"}
+                  </span>
+                )}
+              </span>
+              <span className="shrink-0 text-xs text-muted">
                 {fmtNumber(food.calories)} kcal / {fmtNumber(food.serving_size)}{food.serving_unit}
               </span>
             </button>

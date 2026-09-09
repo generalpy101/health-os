@@ -1,7 +1,8 @@
 from datetime import date
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -17,8 +18,19 @@ router = APIRouter(tags=["nutrition"])
 
 @router.get("/foods/search", response_model=list[FoodOut])
 async def search_foods(q: str = "", limit: int = Query(default=20, le=100),
+                       provider: Literal["local", "remote", "auto"] = "auto",  # TRACK A
                        user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
-    return await nutrition_service.search_foods(db, user, q, limit)
+    return await nutrition_service.search_foods_with_providers(db, user, q, limit, provider)
+
+
+# TRACK A
+@router.get("/foods/barcode/{code}", response_model=FoodOut)
+async def food_by_barcode(code: str, user: User = Depends(current_user),
+                          db: AsyncSession = Depends(get_db)):
+    food = await nutrition_service.food_by_barcode(db, user, code)
+    if food is None:
+        raise HTTPException(404, detail="not found")
+    return food
 
 
 @router.post("/foods", response_model=FoodOut, status_code=201)

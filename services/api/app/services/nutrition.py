@@ -8,6 +8,7 @@ from ..models import Food, FoodLog, User
 from ..schemas import FoodIn, FoodLogIn
 from ..utils import metrics
 from ..utils.time import parse_date
+from . import food_providers
 from .common import audit, get_owned
 
 
@@ -18,6 +19,71 @@ async def search_foods(db: AsyncSession, user: User, query: str = "", limit: int
     stmt = stmt.order_by(Food.user_id.is_(None), Food.name).limit(min(limit, 100))
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+# ---------- TRACK A: remote food providers ----------
+
+async def _cache_remote_foods(db: AsyncSession, rows: list[dict]) -> list[Food]:
+    """Persist remote hits as global foods (user_id=None) so the DB grows over time."""
+    foods: list[Food] = []
+    for row in rows:
+        food = None
+        if row.get("barcode"):
+            existing = await db.execute(
+                select(Food).where(Food.user_id.is_(None), Food.barcode == row["barcode"]).limit(1)
+            )
+            food = existing.scalar_one_or_none()
+        if food is None:
+            fields = {k: v for k, v in row.items() if k != "barcode"}
+            food = Food(user_id=None, barcode=row.get("barcode") or None, **fields)
+            db.add(food)
+        foods.append(food)
+    try:
+        await db.commit()
+        for food in foods:
+            await db.refresh(food)
+    except Exception:
+        await db.rollback()
+        return []
+    return foods
+
+
+async def search_foods_with_providers(db: AsyncSession, user: User, query: str = "",
+                                      limit: int = 20, provider: str = "auto") -> list[Food]:
+    """local: DB only. remote: providers only. auto: local first, remote merged in."""
+    limit = min(limit, 100)
+    if provider == "remote":
+        rows = await food_providers.search_remote(query, min(limit, 20))
+        return (await _cache_remote_foods(db, rows))[:limit]
+    local = await search_foods(db, user, query, limit)
+    if provider != "auto" or not query.strip() or len(local) >= limit:
+        return local
+    rows = await food_providers.search_remote(query, min(limit, 20))
+    if not rows:
+        return local
+    remote = await _cache_remote_foods(db, rows)
+    seen = {f.id for f in local}
+    return (local + [f for f in remote if f.id not in seen])[:limit]
+
+
+async def food_by_barcode(db: AsyncSession, user: User, code: str) -> Food | None:
+    code = code.strip()
+    if not code:
+        return None
+    result = await db.execute(
+        select(Food)
+        .where(Food.barcode == code, or_(Food.user_id == user.id, Food.user_id.is_(None)))
+        .order_by(Food.user_id.is_(None))
+        .limit(1)
+    )
+    food = result.scalar_one_or_none()
+    if food is not None:
+        return food
+    hit = await food_providers.barcode_remote(code)
+    if hit is None:
+        return None
+    cached = await _cache_remote_foods(db, [hit])
+    return cached[0] if cached else None
 
 
 async def create_food(db: AsyncSession, user: User, data: FoodIn) -> Food:

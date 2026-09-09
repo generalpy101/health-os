@@ -174,6 +174,7 @@ class FoodOut(ORMModel):
     fat: float
     fiber: float
     source: str
+    barcode: str | None = None  # TRACK A
 
 
 class FoodLogItemIn(BaseModel):
@@ -589,3 +590,36 @@ class RecommendationOut(ORMModel):
 
 class RecommendationPatch(BaseModel):
     status: str  # accepted|rejected|ignored
+
+
+# ---------- TRACK A: imports ----------
+
+IMPORT_KINDS = ["measurements", "food_logs", "workouts"]
+
+
+class ImportPreviewIn(BaseModel):
+    kind: Literal["measurements", "food_logs", "workouts"]
+    format: Literal["csv", "json"]
+    text: str = Field(min_length=1, max_length=400_000)
+
+
+class ImportRowError(BaseModel):
+    row: int  # 1-based data row index
+    message: str
+
+
+class ImportPreviewOut(BaseModel):
+    rows: list[dict[str, Any]]
+    errors: list[ImportRowError]
+    total: int
+    valid: int
+
+
+class ImportCommitIn(BaseModel):
+    kind: Literal["measurements", "food_logs", "workouts"]
+    rows: list[dict[str, Any]] = Field(max_length=2000)
+
+
+class ImportCommitOut(BaseModel):
+    imported: int
+    skipped: int

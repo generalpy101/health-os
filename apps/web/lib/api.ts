@@ -1,7 +1,7 @@
 import type {
   ChatAction, Conversation, DailySummary, Food, FoodLog, Goal, Habit, HabitProgress,
-  Measurement, NutritionDay, OnboardingProposal, Profile, RangeSummary, Recipe, ScheduleEvent,
-  SleepLog, Target, User, WeightTrend, Workout,
+  ImportKind, ImportPreview, ImportResult, Measurement, NutritionDay, OnboardingProposal, Profile,
+  RangeSummary, Recipe, ScheduleEvent, SleepLog, Target, User, WeightTrend, Workout,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -279,4 +279,13 @@ export const api = {
   aiModels: (providerId: string, baseUrl?: string) =>
     request<{ models: string[]; detected: boolean; source: string; default?: string }>(
       `/ai/providers/${providerId}/models${qs({ base_url: baseUrl })}`),
+
+  // === TRACK A ===
+  searchFoodsProvider: (q: string, limit = 20, provider: "local" | "remote" | "auto" = "auto") =>
+    request<Food[]>(`/foods/search${qs({ q, limit, provider })}`),
+  foodByBarcode: (code: string) => request<Food>(`/foods/barcode/${encodeURIComponent(code)}`),
+  importPreview: (b: { kind: ImportKind; format: "csv" | "json"; text: string }) =>
+    post<ImportPreview>("/import/preview", b),
+  importCommit: (b: { kind: ImportKind; rows: Record<string, unknown>[] }) =>
+    post<ImportResult>("/import/commit", b),
 };

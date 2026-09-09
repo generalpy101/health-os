@@ -51,6 +51,7 @@ export interface Food {
   fat: number;
   fiber: number;
   source: string;
+  barcode?: string | null; // TRACK A
 }
 
 export interface FoodLogItem {
@@ -288,4 +289,25 @@ export interface OnboardingProposal {
   events: { type: string; title: string; bydays?: number[]; hour?: number; end_hour?: number }[];
   memories: { type: string; key: string; value: string }[];
   defaults_suggested?: { calories: number; protein_g: number; water_ml: number };
+}
+
+// === TRACK A ===
+
+export type ImportKind = "measurements" | "food_logs" | "workouts";
+
+export interface ImportRowError {
+  row: number;
+  message: string;
+}
+
+export interface ImportPreview {
+  rows: Record<string, unknown>[];
+  errors: ImportRowError[];
+  total: number;
+  valid: number;
+}
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
 }
