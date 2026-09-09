@@ -50,6 +50,20 @@ def test_enrich_never_fabricates_stats():
 
 
 @pytest.mark.asyncio
+async def test_onboarding_parse_endpoint_mock_inline():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        async with app.router.lifespan_context(app):
+            await c.post("/api/v1/auth/signup", json={"email": "parse@x.co", "password": "password123"})
+            r = await c.post("/api/v1/ai/onboarding/parse",
+                             json={"text": "25 yo male, 173cm, 82kg, lose fat from 82 to 74 kg, train four times a week"})
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["status"] == "done"
+            assert body["result"]["weight_kg"] == 82.0
+            assert {t["key"] for t in body["result"]["suggested_targets"]} >= {"calories", "protein", "water"}
+
+
+@pytest.mark.asyncio
 async def test_onboarding_commit_creates_measurement_and_plan():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         async with app.router.lifespan_context(app):

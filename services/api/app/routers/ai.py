@@ -9,8 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..ai import service as ai_service
-from ..ai.registry import (detect_providers, get_ai_pref, mask_ai_pref, resolve_provider_from_pref,
-                           save_ai_pref)
+from ..ai.registry import (detect_providers, get_ai_pref, mask_ai_pref, provider_for_user,
+                           resolve_provider_from_pref, save_ai_pref)
 from ..db import get_db
 from ..deps import current_user
 from ..models import (AIAction, AIConversation, AIMessage, Recommendation, User, UserMemory,
