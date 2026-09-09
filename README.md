@@ -100,6 +100,17 @@ All under `/api/v1`: `auth/*`, `users/me*` (+ `users/me/export`, `DELETE /users/
 `ai/onboarding/*`, `ai/providers`, `ai/settings`, `ai/test`, `ai/recommendations`, `photos*`,
 `notifications`. OpenAPI docs at `http://localhost:8000/docs` when the API runs.
 
+## Feature notes
+
+- **Food data**: local DB + USDA FoodData Central (`USDA_API_KEY`) + Open Food Facts with barcode lookup;
+  remote hits cache into the local DB. CSV/JSON import with preview at Nutrition → Import.
+- **Reviews**: weekly/monthly AI narrative over your real numbers (works offline) at /reviews.
+- **Streaming chat**: SSE for OpenAI-compatible providers; mock/CLI emit a single frame.
+- **Push**: Web Push reminders for upcoming schedule events (VAPID keys auto-generated; enable on /reviews).
+- **Versioning**: goal/target/workout-plan changes snapshot the old state; revert from Settings → Plan history.
+- **Search**: ⌘K searches foods/recipes/exercises/chats; `/search/semantic` activates when an
+  embeddings-capable provider is configured (Ollama `nomic-embed-text` or OpenAI-compatible).
+
 ## Device sync (Apple Health etc.)
 
 Any source that can HTTP POST can push metrics into HealthOS via the ingest API
