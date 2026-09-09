@@ -436,4 +436,39 @@ class Embedding(Base):
     model: Mapped[str] = mapped_column(sa.String(120), default="")
     text_hash: Mapped[str] = mapped_column(sa.String(64), default="")  # re-embed when text changes
     vector: Mapped[list] = mapped_column(JSON, default=list)
+# === TRACK B ===
+
+class BackgroundJob(Base):
+    __tablename__ = "background_jobs"
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid, sa.ForeignKey("users.id"), nullable=True, index=True)
+    kind: Mapped[str] = mapped_column(sa.String(60), index=True)  # generate_review|check_reminders|...
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(sa.String(16), default="pending", index=True)  # pending|running|done|failed
+    run_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow, index=True)
+    attempts: Mapped[int] = mapped_column(sa.Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
+
+
+class Review(Base):
+    __tablename__ = "reviews"
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, sa.ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(sa.String(16))  # weekly|monthly
+    period_start: Mapped[date] = mapped_column(sa.Date)
+    period_end: Mapped[date] = mapped_column(sa.Date)
+    narrative: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)  # cached range/monthly summary
+    generated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
+    __table_args__ = (sa.UniqueConstraint("user_id", "kind", "period_start"),)
+
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, sa.ForeignKey("users.id"), index=True)
+    endpoint: Mapped[str] = mapped_column(sa.Text, unique=True)
+    keys: Mapped[dict] = mapped_column(JSON, default=dict)  # {p256dh, auth}
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)

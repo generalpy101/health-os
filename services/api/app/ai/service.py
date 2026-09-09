@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
+from collections.abc import AsyncGenerator
+from contextlib import suppress
 from uuid import UUID
 
 from sqlalchemy import select
@@ -75,8 +78,15 @@ async def _get_conversation(db: AsyncSession, user: User, conversation_id: UUID 
     return conv
 
 
-async def chat(db: AsyncSession, user: User, message: str, conversation_id: UUID | None = None,
-               provider: AIProvider | None = None) -> tuple[AIConversation, str, list[AIAction]]:
+async def _chat_core(db: AsyncSession, user: User, message: str, conversation_id: UUID | None = None,
+                     provider: AIProvider | None = None, on_delta=None,
+                     ) -> tuple[AIConversation, str, list[AIAction]]:
+    """Shared chat loop for /ai/chat and /ai/chat/stream.
+
+    When `on_delta` is given, provider rounds go through provider.stream() and text
+    deltas are forwarded as they arrive; tool execution and ai_actions auditing are
+    identical either way.
+    """
     settings = get_settings()
     provider = provider or await provider_for_user(db, user)
     conv = await _get_conversation(db, user, conversation_id)
@@ -100,7 +110,10 @@ async def chat(db: AsyncSession, user: User, message: str, conversation_id: UUID
     for _round in range(settings.ai_max_tool_rounds):
         started = time.perf_counter()
         try:
-            resp = await provider.complete(messages, tools=tool_schemas())
+            if on_delta is None:
+                resp = await provider.complete(messages, tools=tool_schemas())
+            else:
+                resp = await provider.stream(messages, tools=tool_schemas(), on_delta=on_delta)
         except Exception as exc:
             reply = (f"The AI provider is unavailable right now ({type(exc).__name__}). "
                      "You can still use every screen and log manually — nothing here depends on AI.")
@@ -146,6 +159,55 @@ async def chat(db: AsyncSession, user: User, message: str, conversation_id: UUID
                      model=settings.ai_model))
     await db.commit()
     return conv, reply, actions
+
+
+async def chat(db: AsyncSession, user: User, message: str, conversation_id: UUID | None = None,
+               provider: AIProvider | None = None) -> tuple[AIConversation, str, list[AIAction]]:
+    return await _chat_core(db, user, message, conversation_id, provider)
+
+
+async def chat_stream(db: AsyncSession, user: User, message: str,
+                      conversation_id: UUID | None = None) -> AsyncGenerator[dict, None]:
+    """Streaming variant of chat(). Yields event dicts:
+      {"type": "delta", "text": ...}            reply fragments as they arrive
+      {"type": "actions", "actions": [...]}     audited tool actions (AIAction rows)
+      {"type": "done", "conversation_id", "reply"}
+      {"type": "error", "message": ...}         on unexpected failure
+    """
+    queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+    async def on_delta(text: str) -> None:
+        await queue.put({"type": "delta", "text": text})
+
+    async def run() -> None:
+        try:
+            conv, reply, actions = await _chat_core(db, user, message, conversation_id, on_delta=on_delta)
+            await queue.put({"type": "actions", "actions": [
+                {"id": str(a.id), "tool": a.tool, "arguments": _s(a.arguments),
+                 "result": _s(a.result), "status": a.status,
+                 "created_at": a.created_at.isoformat() if a.created_at else None}
+                for a in actions
+            ]})
+            await queue.put({"type": "done", "conversation_id": str(conv.id), "reply": reply})
+        except Exception as exc:
+            await queue.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(run())
+    try:
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield event
+    finally:
+        if task.done():
+            await task  # run() swallows handler errors into events; this just collects it
+        else:
+            task.cancel()  # client disconnected mid-stream
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 # ---------------------------------------------------------------------------

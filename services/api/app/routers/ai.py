@@ -1,7 +1,9 @@
+import json
 import time
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +29,23 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 async def chat(data: ChatIn, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     conv, reply, actions = await ai_service.chat(db, user, data.message, data.conversation_id)
     return ChatOut(conversation_id=conv.id, reply=reply, actions=actions)
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+@router.post("/chat/stream")
+async def chat_stream(data: ChatIn, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    async def events():
+        async for ev in ai_service.chat_stream(db, user, data.message, data.conversation_id):
+            yield _sse(ev.pop("type"), ev)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ---------- provider selection ----------

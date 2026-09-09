@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, CheckCircle2, Sparkles, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Empty, Spinner } from "@/components/ui";
@@ -22,6 +22,7 @@ export default function AssistantPage() {
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
   const queryClient = useQueryClient();
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -40,24 +41,65 @@ export default function AssistantPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const send = useMutation({
-    mutationFn: (text: string) => api.chat(text, conversationId),
-    onSuccess: (res) => {
-      setConversationId(res.conversation_id);
-      setMessages((m) => [...m, { role: "assistant", content: res.reply, actions: res.actions }]);
-      queryClient.invalidateQueries(); // AI actions may have changed anything
-    },
-    onError: (e) => {
-      setMessages((m) => [...m, { role: "assistant", content: `Something went wrong: ${e.message}` }]);
-    },
-  });
+  // both helpers lazily open the assistant bubble on first server output
+  function patchLast(patch: Partial<ChatMessage>) {
+    setMessages((m) => {
+      const copy = m[m.length - 1]?.role === "assistant"
+        ? [...m]
+        : [...m, { role: "assistant" as const, content: "" }];
+      copy[copy.length - 1] = { ...copy[copy.length - 1], ...patch };
+      return copy;
+    });
+  }
 
-  function submit(text: string) {
+  function appendDelta(text: string) {
+    setMessages((m) => {
+      const copy = m[m.length - 1]?.role === "assistant"
+        ? [...m]
+        : [...m, { role: "assistant" as const, content: "" }];
+      const last = copy[copy.length - 1];
+      copy[copy.length - 1] = { ...last, content: last.content + text };
+      return copy;
+    });
+  }
+
+  async function submit(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || send.isPending) return;
+    if (!trimmed || busy) return;
     setMessages((m) => [...m, { role: "user", content: trimmed }]);
     setInput("");
-    send.mutate(trimmed);
+    setBusy(true);
+    let arrived = false; // any server output (delta/actions/done) — used to gate the fallback
+    try {
+      await api.chatStream(trimmed, conversationId, {
+        onDelta: (t) => { arrived = true; appendDelta(t); },
+        onActions: (actions) => { arrived = true; patchLast({ actions }); },
+        onDone: (cid, reply) => {
+          arrived = true;
+          setConversationId(cid);
+          patchLast({ content: reply });
+        },
+      });
+      queryClient.invalidateQueries(); // AI actions may have changed anything
+    } catch (e) {
+      if (!arrived) {
+        // stream never got going (offline, proxy, old server) — one-shot plain fallback
+        try {
+          const res = await api.chat(trimmed, conversationId);
+          setConversationId(res.conversation_id);
+          patchLast({ content: res.reply, actions: res.actions });
+          queryClient.invalidateQueries();
+        } catch (e2) {
+          patchLast({ content: `Something went wrong: ${(e2 as Error).message}` });
+        }
+      } else {
+        // partial stream — never re-send (tools may already have executed)
+        appendDelta("\n\n*(connection lost — partial reply)*");
+      }
+    } finally {
+      setBusy(false);
+      inputRef.current?.focus();
+    }
   }
 
   return (
@@ -101,7 +143,12 @@ export default function AssistantPage() {
                   : "rounded-bl-md border border-line bg-surface"
               )}
             >
-              <div className="whitespace-pre-wrap">{m.content}</div>
+              <div className="whitespace-pre-wrap">
+                {m.content}
+                {busy && i === messages.length - 1 && m.role === "assistant" && (
+                  <span className="ml-0.5 inline-block h-4 w-[7px] animate-pulse rounded-sm bg-accent/70 align-text-bottom" />
+                )}
+              </div>
               {m.actions && m.actions.length > 0 && (
                 <div className="mt-2 space-y-1 border-t border-line pt-2">
                   {m.actions.map((a) => (
@@ -112,7 +159,7 @@ export default function AssistantPage() {
             </div>
           </div>
         ))}
-        {send.isPending && (
+        {busy && messages[messages.length - 1]?.role === "user" && (
           <div className="flex items-center gap-2 text-sm text-muted">
             <Spinner className="h-4 w-4" /> Thinking…
           </div>
@@ -134,7 +181,7 @@ export default function AssistantPage() {
           />
           <button
             type="submit"
-            disabled={!input.trim() || send.isPending}
+            disabled={!input.trim() || busy}
             aria-label="Send"
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-accent text-accent-ink transition-opacity disabled:opacity-40"
           >

@@ -291,7 +291,6 @@ export interface OnboardingProposal {
   defaults_suggested?: { calories: number; protein_g: number; water_ml: number };
 }
 
-<<<<<<< HEAD
 // === TRACK C ===
 
 export interface PlanVersion {
@@ -318,7 +317,8 @@ export interface SearchResults {
 export interface SemanticSearchResponse {
   results: { entity_type: string; entity_id: string; snippet: string; score: number }[];
   message?: string;
-=======
+}
+
 // === TRACK A ===
 
 export type ImportKind = "measurements" | "food_logs" | "workouts";
@@ -338,5 +338,20 @@ export interface ImportPreview {
 export interface ImportResult {
   imported: number;
   skipped: number;
->>>>>>> track-a-food-data
+}
+
+// === TRACK B ===
+
+export interface Review {
+  start: string;
+  end: string;
+  data: RangeSummary;
+  narrative: string | null;
+  generated_at: string;
+}
+
+export interface ChatStreamHandlers {
+  onDelta?: (text: string) => void;
+  onActions?: (actions: ChatAction[]) => void;
+  onDone?: (conversationId: string, reply: string) => void;
 }
