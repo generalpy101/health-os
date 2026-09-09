@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Moon, Sun, Trash2 } from "lucide-react";
+import { Copy, Download, History, Moon, RefreshCw, Sun, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { TopBar } from "@/components/nav";
@@ -223,6 +223,10 @@ export default function SettingsPage() {
             </ul>
           )}
         </Card>
+
+        <DevicesCard />
+
+        <PlanHistoryCard />
       </main>
     </>
   );
@@ -534,5 +538,132 @@ function TargetAdder({ label, unit, period, targetKey, onAdd }: {
       <Button size="sm" type="submit">Set</Button>
       <button type="button" onClick={() => setEditing(false)} className={cx("p-1 text-faint hover:text-ink")}>✕</button>
     </form>
+  );
+}
+
+// === TRACK C ===
+
+function DevicesCard() {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const { data } = useQuery({ queryKey: ["ingest-token"], queryFn: api.ingestToken });
+  const rotate = useMutation({
+    mutationFn: api.rotateIngestToken,
+    onSuccess: (d) => {
+      queryClient.setQueryData(["ingest-token"], d);
+      toast("Token rotated — the old one stopped working");
+    },
+    onError: (e) => toast(e.message, "err"),
+  });
+  const token = data?.token || "";
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://your-host";
+  const now = new Date().toISOString();
+  const curl = `curl -X POST ${origin}/api/v1/integrations/ingest \\
+  -H "Authorization: Bearer ${token || "<token>"}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"source":"shortcut","events":[{"metric":"steps","value":8500,"observed_at":"${now}","external_id":"steps-${now.slice(0, 10)}"}]}'`;
+
+  async function copy(text: string, what: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(`${what} copied`);
+    } catch {
+      toast("Copy failed — select and copy manually", "err");
+    }
+  }
+
+  return (
+    <Card>
+      <CardTitle>Devices &amp; import</CardTitle>
+      <p className="mb-3 text-sm leading-relaxed text-muted">
+        Push steps, weight, water and more from Apple Health, a Garmin sync script, or any HTTP client.
+        Authenticate with this per-user Bearer token (not your login cookie).
+      </p>
+      <div className="flex items-center gap-2">
+        <Input readOnly value={token} className="font-mono text-[13px]" aria-label="Ingest token" />
+        <Button variant="outline" className="shrink-0" onClick={() => copy(token, "Token")} disabled={!token}>
+          <Copy size={14} /> Copy
+        </Button>
+        <Button variant="outline" className="shrink-0" onClick={() => rotate.mutate()} disabled={rotate.isPending}>
+          <RefreshCw size={14} /> Rotate
+        </Button>
+      </div>
+      <div className="mt-3">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-[13px] font-medium text-muted">Send a reading</span>
+          <button onClick={() => copy(curl, "curl example")}
+                  className="text-xs font-medium text-accent hover:underline">Copy curl</button>
+        </div>
+        <pre className="overflow-x-auto rounded-xl border border-line bg-surface-2 p-3 text-[11px] leading-relaxed text-muted">{curl}</pre>
+      </div>
+      <p className="mt-3 text-xs leading-relaxed text-faint">
+        iOS Shortcuts: “Get Contents of URL” → Method <strong className="text-muted">POST</strong>, header{" "}
+        <code className="rounded bg-surface-2 px-1">Authorization: Bearer &lt;token&gt;</code>, JSON body{" "}
+        <code className="rounded bg-surface-2 px-1">{"{\"source\":\"apple_health\",\"events\":[…]}"}</code>{" "}
+        — metrics: steps, weight, water_ml, sleep_minutes, active_calories, heart_rate. Send an{" "}
+        <code className="rounded bg-surface-2 px-1">external_id</code> per reading to make re-sends idempotent.
+      </p>
+    </Card>
+  );
+}
+
+const ENTITY_LABELS: Record<string, string> = {
+  goal: "Goal", target: "Target", workout_plan: "Workout plan",
+};
+
+function PlanHistoryCard() {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const { data: versions } = useQuery({
+    queryKey: ["plan-history"],
+    queryFn: () => api.recentVersions(),
+  });
+  const revert = useMutation({
+    mutationFn: api.revertVersion,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["plan-history"] });
+      queryClient.invalidateQueries({ queryKey: ["goals"] });
+      queryClient.invalidateQueries({ queryKey: ["targets"] });
+      queryClient.invalidateQueries({ queryKey: ["workout-plans"] });
+      toast("Reverted");
+    },
+    onError: (e) => toast(e.message, "err"),
+  });
+
+  return (
+    <Card>
+      <CardTitle>Plan history</CardTitle>
+      {!versions?.length ? (
+        <p className="text-sm text-faint">
+          Nothing yet — edits to goals, targets and workout plans are versioned and show up here.
+        </p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {versions.map((v) => {
+            const label = String(v.snapshot?.title || v.snapshot?.name || v.snapshot?.key || "");
+            return (
+              <li key={v.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                <span className="min-w-0">
+                  <span className="mr-2 rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                    {ENTITY_LABELS[v.entity_type] || v.entity_type} · v{v.version}
+                  </span>
+                  <span className="font-medium">{label}</span>
+                  <span className="block truncate text-[11px] text-faint">
+                    {v.reason} · by {v.actor} ·{" "}
+                    {new Date(v.created_at).toLocaleString(undefined, {
+                      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                    })}
+                  </span>
+                </span>
+                <Button size="sm" variant="outline" className="shrink-0"
+                        disabled={revert.isPending} onClick={() => revert.mutate(v.id)}>
+                  <History size={13} /> Revert
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
   );
 }

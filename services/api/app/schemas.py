@@ -589,3 +589,18 @@ class RecommendationOut(ORMModel):
 
 class RecommendationPatch(BaseModel):
     status: str  # accepted|rejected|ignored
+
+
+# ---------- track c: integrations / ingest ----------
+
+class IngestEventIn(BaseModel):
+    metric: str = Field(min_length=1, max_length=40)
+    value: float
+    unit: str | None = Field(default=None, max_length=24)
+    observed_at: datetime
+    external_id: str | None = Field(default=None, max_length=120)
+
+
+class IngestIn(BaseModel):
+    source: str = Field(min_length=1, max_length=40)  # apple_health|shortcut|...
+    events: list[IngestEventIn] = Field(default_factory=list, max_length=500)

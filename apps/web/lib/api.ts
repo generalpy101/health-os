@@ -279,4 +279,17 @@ export const api = {
   aiModels: (providerId: string, baseUrl?: string) =>
     request<{ models: string[]; detected: boolean; source: string; default?: string }>(
       `/ai/providers/${providerId}/models${qs({ base_url: baseUrl })}`),
+
+  // === TRACK C ===
+  planVersions: (entityType: string, entityId: string) =>
+    request<import("./types").PlanVersion[]>(`/versions/${entityType}/${entityId}`),
+  recentVersions: (limit = 20) =>
+    request<import("./types").RecentPlanVersion[]>(`/versions${qs({ limit })}`),
+  revertVersion: (id: string) =>
+    post<{ ok: boolean; entity: Record<string, unknown> }>(`/versions/${id}/revert`, {}),
+  ingestToken: () => request<{ token: string }>("/integrations/token"),
+  rotateIngestToken: () => post<{ token: string }>("/integrations/rotate", {}),
+  searchAll: (q: string) => request<import("./types").SearchResults>(`/search${qs({ q })}`),
+  semanticSearch: (q: string) =>
+    request<import("./types").SemanticSearchResponse>(`/search/semantic${qs({ q })}`),
 };

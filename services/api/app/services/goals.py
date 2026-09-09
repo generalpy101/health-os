@@ -8,6 +8,7 @@ from ..models import Goal, Measurement, Target, User
 from ..schemas import GoalIn, GoalPatch, TargetIn, TargetPatch
 from ..utils import metrics
 from .common import audit, get_owned
+from .versions import record_version, row_snapshot
 
 
 async def create_goal(db: AsyncSession, user: User, data: GoalIn, source: str = "user") -> Goal:
@@ -27,9 +28,12 @@ async def list_goals(db: AsyncSession, user: User, status_filter: str | None = N
     return list(result.scalars().all())
 
 
-async def update_goal(db: AsyncSession, user: User, goal_id: UUID, patch: GoalPatch) -> Goal:
+async def update_goal(db: AsyncSession, user: User, goal_id: UUID, patch: GoalPatch,
+                      *, reason: str | None = None, actor: str = "user") -> Goal:
     goal = await get_owned(db, Goal, goal_id, user)
     changes = patch.model_dump(exclude_none=True)
+    await record_version(db, user.id, "goal", goal.id, row_snapshot(goal),
+                         reason or "goal update", actor)
     for key, value in changes.items():
         setattr(goal, key, value)
     await audit(db, user.id, "goal_changed", "goal", goal.id, changes)
@@ -58,13 +62,17 @@ async def goal_progress(db: AsyncSession, user: User, goal_id: UUID) -> dict:
 
 # ---------- targets ----------
 
-async def create_target(db: AsyncSession, user: User, data: TargetIn) -> Target:
+async def create_target(db: AsyncSession, user: User, data: TargetIn, *, actor: str | None = None) -> Target:
     # replace an active target of the same key+period (keep history by deactivating)
     result = await db.execute(
         select(Target).where(Target.user_id == user.id, Target.key == data.key,
                              Target.period == data.period, Target.active.is_(True))
     )
+    if actor is None:
+        actor = "ai" if data.source == "ai" else "user"
     for old in result.scalars().all():
+        await record_version(db, user.id, "target", old.id, row_snapshot(old),
+                             f"replaced by new {data.key} target", actor)
         old.active = False
     target = Target(user_id=user.id, effective_from=date.today(), **data.model_dump())
     db.add(target)
@@ -82,9 +90,12 @@ async def list_targets(db: AsyncSession, user: User, active_only: bool = True) -
     return list(result.scalars().all())
 
 
-async def update_target(db: AsyncSession, user: User, target_id: UUID, patch: TargetPatch) -> Target:
+async def update_target(db: AsyncSession, user: User, target_id: UUID, patch: TargetPatch,
+                        *, reason: str | None = None, actor: str = "user") -> Target:
     target = await get_owned(db, Target, target_id, user)
     changes = patch.model_dump(exclude_none=True)
+    await record_version(db, user.id, "target", target.id, row_snapshot(target),
+                         reason or "target update", actor)
     for key, value in changes.items():
         setattr(target, key, value)
     await audit(db, user.id, "target_changed", "target", target.id, changes)
