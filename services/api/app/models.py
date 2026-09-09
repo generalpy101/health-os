@@ -171,11 +171,18 @@ class MealPlan(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, sa.ForeignKey("users.id"), index=True)
     date: Mapped[date] = mapped_column(sa.Date, index=True)
     meal_type: Mapped[str] = mapped_column(sa.String(32), default="other")
+    time_minutes: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)  # local minutes from midnight
     recipe_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid, sa.ForeignKey("recipes.id"), nullable=True)
     name: Mapped[str] = mapped_column(sa.String(200), default="")
     servings: Mapped[float] = mapped_column(sa.Float, default=1)
     notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
+
+    @property
+    def time(self) -> str | None:
+        if self.time_minutes is None:
+            return None
+        return f"{self.time_minutes // 60:02d}:{self.time_minutes % 60:02d}"
 
 
 class Exercise(Base):

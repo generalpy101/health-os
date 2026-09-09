@@ -180,9 +180,9 @@ const apiBase = {
   updateRecipe: (id: string, b: unknown) => put<Recipe>(`/recipes/${id}`, b),
   deleteRecipe: (id: string) => del(`/recipes/${id}`),
   mealPlans: (start: string, end: string) =>
-    request<{ id: string; date: string; meal_type: string; recipe_id: string | null; name: string; servings: number; notes: string | null }[]>(
+    request<{ id: string; date: string; meal_type: string; time: string | null; recipe_id: string | null; name: string; servings: number; notes: string | null }[]>(
       `/meal-plans${qs({ start, end })}`),
-  createMealPlan: (b: { date: string; meal_type: string; recipe_id?: string; name: string; servings?: number }) =>
+  createMealPlan: (b: { date: string; meal_type: string; time?: string; recipe_id?: string; name: string; servings?: number }) =>
     post("/meal-plans", b),
   deleteMealPlan: (id: string) => del(`/meal-plans/${id}`),
   groceryList: (start: string, end: string) =>

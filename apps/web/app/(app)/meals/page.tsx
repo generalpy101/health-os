@@ -2,9 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChefHat, Plus, ShoppingBasket, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { TopBar } from "@/components/nav";
-import { Button, Card, Empty, Field, Input, PageLoading, Select, Sheet, useToast } from "@/components/ui";
+import { DayTimeline } from "@/components/day-timeline";
+import { Button, Card, Empty, Field, Input, PageLoading, Segmented, Select, Sheet, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
 import type { Recipe } from "@/lib/types";
 import { addDays, cx, fmtNumber, toISODate, todayISO } from "@/lib/utils";
@@ -14,7 +15,9 @@ const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
 
 export default function MealsPage() {
   const [weekOffset, setWeekOffset] = useState(0);
-  const [slot, setSlot] = useState<{ date: string; meal: string } | null>(null);
+  const [view, setView] = useState<"board" | "timeline">("board");
+  const [tlDay, setTlDay] = useState(todayISO());
+  const [slot, setSlot] = useState<{ date: string; meal: string; time?: string } | null>(null);
   const [groceryOpen, setGroceryOpen] = useState(false);
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -75,9 +78,41 @@ export default function MealsPage() {
     <>
       <TopBar
         title="Meal planner"
-        right={<Button size="sm" variant="outline" onClick={() => setGroceryOpen(true)}><ShoppingBasket size={15} /> Groceries</Button>}
+        right={
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <Segmented options={[{ value: "board", label: "Board" }, { value: "timeline", label: "Timeline" }]}
+                       value={view} onChange={setView} />
+            <Button size="sm" variant="outline" onClick={() => setGroceryOpen(true)}>
+              <ShoppingBasket size={15} /><span className="hidden sm:inline"> Groceries</span>
+            </Button>
+          </div>
+        }
       />
       <main className="mx-auto max-w-5xl px-4 py-5 sm:px-6">
+        {view === "timeline" ? (
+          <>
+            <div className="mb-4 flex items-center justify-between">
+              <Button variant="ghost" size="sm" onClick={() => setTlDay(toISODate(addDays(new Date(tlDay), -1)))}>← Prev</Button>
+              <div className="text-center">
+                <div className="font-display text-lg font-semibold">
+                  {new Date(tlDay + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+                </div>
+                {tlDay !== todayISO() && (
+                  <button className="text-xs font-medium text-accent" onClick={() => setTlDay(todayISO())}>Today</button>
+                )}
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setTlDay(toISODate(addDays(new Date(tlDay), 1)))}>Next →</Button>
+            </div>
+            <DayTimeline
+              day={tlDay}
+              onPickSlot={(min) => setSlot({
+                date: tlDay, meal: "other",
+                time: `${String(Math.floor(min / 60)).padStart(2, "0")}:00`,
+              })}
+            />
+          </>
+        ) : (
+          <>
         <div className="mb-4 flex items-center justify-between">
           <Button variant="ghost" size="sm" onClick={() => setWeekOffset(weekOffset - 1)}>← Prev</Button>
           <div className="text-center">
@@ -173,6 +208,8 @@ export default function MealsPage() {
             })}
           </div>
         )}
+          </>
+        )}
       </main>
 
       <AddMealSheet slot={slot} onClose={() => setSlot(null)} recipes={recipes || []} />
@@ -182,17 +219,21 @@ export default function MealsPage() {
 }
 
 function AddMealSheet({ slot, onClose, recipes }: {
-  slot: { date: string; meal: string } | null; onClose: () => void; recipes: Recipe[];
+  slot: { date: string; meal: string; time?: string } | null; onClose: () => void; recipes: Recipe[];
 }) {
   const [name, setName] = useState("");
   const [recipeId, setRecipeId] = useState("");
+  const [time, setTime] = useState("");
   const queryClient = useQueryClient();
   const toast = useToast();
+
+  useEffect(() => { if (slot) setTime(slot.time || ""); }, [slot]);
 
   const save = useMutation({
     mutationFn: () =>
       api.createMealPlan({
         date: slot!.date, meal_type: slot!.meal,
+        ...(time ? { time } : {}),
         ...(recipeId ? { recipe_id: recipeId, name: recipes.find((r) => r.id === recipeId)?.name || name } : { name }),
       }),
     onSuccess: () => {
@@ -207,6 +248,9 @@ function AddMealSheet({ slot, onClose, recipes }: {
   return (
     <Sheet open={!!slot} onClose={onClose} title={slot ? `${slot.meal[0].toUpperCase() + slot.meal.slice(1)} — ${slot.date}` : ""}>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (name.trim() || recipeId) save.mutate(); }}>
+        <Field label="Time (optional)" hint="Leave empty for 'anytime' — your schedule isn't rigid">
+          <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+        </Field>
         <Field label="From your recipes">
           <Select value={recipeId} onChange={(e) => setRecipeId(e.target.value)}>
             <option value="">— pick a recipe —</option>

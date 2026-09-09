@@ -75,7 +75,18 @@ async def recipe_nutrition(db: AsyncSession, user: User, recipe_id: UUID) -> dic
 # ---------- meal plans ----------
 
 async def create_meal_plan(db: AsyncSession, user: User, data: MealPlanIn) -> MealPlan:
-    plan = MealPlan(user_id=user.id, **data.model_dump())
+    fields = data.model_dump()
+    time_str = fields.pop("time", None)
+    time_minutes = None
+    if time_str:
+        try:
+            h, m = time_str.split(":")
+            time_minutes = int(h) * 60 + int(m)
+            if not (0 <= time_minutes < 24 * 60):
+                time_minutes = None
+        except (ValueError, AttributeError):
+            time_minutes = None
+    plan = MealPlan(user_id=user.id, time_minutes=time_minutes, **fields)
     db.add(plan)
     await db.commit()
     await db.refresh(plan)

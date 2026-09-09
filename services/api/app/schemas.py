@@ -283,6 +283,7 @@ class RecipeOut(ORMModel):
 class MealPlanIn(BaseModel):
     date: date
     meal_type: str = "other"
+    time: str | None = None  # "HH:MM" local; None = unscheduled
     recipe_id: UUID | None = None
     name: str = Field(default="", max_length=200)
     servings: float = Field(default=1, gt=0)
@@ -293,6 +294,7 @@ class MealPlanOut(ORMModel):
     id: UUID
     date: date
     meal_type: str
+    time: str | None
     recipe_id: UUID | None
     name: str
     servings: float
