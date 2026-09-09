@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from uuid import UUID
 
@@ -115,6 +116,14 @@ async def _resolve_item(db: AsyncSession, user: User, item: dict) -> dict:
         matches = await search_foods(db, user, out["name"], limit=8)
         if not matches and singular != name_l:
             matches = await search_foods(db, user, singular, limit=8)
+        if not matches:
+            # word-reduction: "chicken cutlets" → "chicken"; "greek yogurt bowl" → "greek yogurt" → "greek"
+            words = [w for w in re.split(r"\s+", name_l) if len(w) > 2]
+            for n in range(len(words) - 1, 0, -1):
+                sub = " ".join(words[:n])
+                matches = await search_foods(db, user, sub, limit=8)
+                if matches:
+                    break
         exact_match = next(
             (f for f in matches if f.name.lower() in (name_l, singular)
              or f.name.lower().split(" (")[0] in (name_l, singular)),

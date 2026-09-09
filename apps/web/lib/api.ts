@@ -176,6 +176,7 @@ const apiBase = {
   // recipes
   recipes: (q = "") => request<Recipe[]>(`/recipes${qs({ q })}`),
   createRecipe: (b: unknown) => post<Recipe>("/recipes", b),
+  updateRecipe: (id: string, b: unknown) => put<Recipe>(`/recipes/${id}`, b),
   deleteRecipe: (id: string) => del(`/recipes/${id}`),
   mealPlans: (start: string, end: string) =>
     request<{ id: string; date: string; meal_type: string; recipe_id: string | null; name: string; servings: number; notes: string | null }[]>(

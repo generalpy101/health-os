@@ -47,6 +47,24 @@ FOODS: list[tuple[str, float, str, float, float, float, float, float]] = [
     ("Cottage cheese", 100, "g", 98, 11, 3.4, 4.3, 0),
     ("Honey", 21, "g", 64, 0, 17.3, 0, 0),
     ("Black coffee", 240, "ml", 2, 0.3, 0, 0, 0),
+    # aromatics & cooking basics (so AI-built recipes resolve cleanly)
+    ("Garlic", 5, "g", 7, 0.3, 1.7, 0, 0.1),
+    ("Butter", 10, "g", 72, 0.1, 0, 8.1, 0),
+    ("Ghee", 10, "g", 90, 0, 0, 10, 0),
+    ("Lemon", 1, "piece", 17, 0.6, 5.4, 0.2, 1.6),
+    ("Onion", 100, "g", 40, 1.1, 9.3, 0.1, 1.7),
+    ("Tomato", 100, "g", 18, 0.9, 3.9, 0.2, 1.2),
+    ("Ginger", 10, "g", 8, 0.2, 1.8, 0.1, 0.2),
+    ("Basmati rice (cooked)", 100, "g", 121, 3.5, 25, 0.4, 0.4),
+    ("Coconut oil", 10, "ml", 89, 0, 0, 10, 0),
+    ("Soy sauce", 15, "ml", 8, 1.3, 0.8, 0, 0.1),
+    ("Curd rice (homemade)", 100, "g", 98, 4.2, 13, 3.1, 0.2),
+    ("Poha (cooked)", 100, "g", 110, 2.4, 22, 1.4, 1.1),
+    ("Upma (cooked)", 100, "g", 105, 2.9, 16, 3.6, 1.4),
+    ("Idli", 1, "piece", 39, 1.6, 7.9, 0.1, 0.5),
+    ("Dosa (plain)", 1, "piece", 106, 2.7, 17, 1.8, 0.7),
+    ("Rajma (cooked)", 100, "g", 127, 8.7, 22.8, 0.5, 6.4),
+    ("Chole (cooked)", 100, "g", 164, 8.9, 27, 2.6, 7.6),
 ]
 
 # name, muscle_groups, movement_pattern, equipment, difficulty
@@ -80,14 +98,18 @@ EXERCISES: list[tuple[str, list[str], str, str, str]] = [
 
 
 async def seed(db: AsyncSession) -> None:
-    existing = await db.execute(select(Food).where(Food.user_id.is_(None)).limit(1))
-    if existing.scalar_one_or_none() is None:
-        for name, size, unit, cal, pro, carb, fat, fiber in FOODS:
+    # upsert by name so existing deployments pick up newly added staples
+    existing = await db.execute(select(Food.name).where(Food.user_id.is_(None)))
+    have = {n for (n,) in existing.all()}
+    for name, size, unit, cal, pro, carb, fat, fiber in FOODS:
+        if name not in have:
+            have.add(name)  # also dedupes within FOODS itself
             db.add(Food(user_id=None, name=name, serving_size=size, serving_unit=unit,
                         calories=cal, protein=pro, carbs=carb, fat=fat, fiber=fiber, source="seed"))
-    existing_ex = await db.execute(select(Exercise).limit(1))
-    if existing_ex.scalar_one_or_none() is None:
-        for name, muscles, pattern, equipment, difficulty in EXERCISES:
+    existing_ex = await db.execute(select(Exercise.name))
+    have_ex = {n for (n,) in existing_ex.all()}
+    for name, muscles, pattern, equipment, difficulty in EXERCISES:
+        if name not in have_ex:
             db.add(Exercise(name=name, muscle_groups=muscles, movement_pattern=pattern,
                             equipment=equipment, difficulty=difficulty))
     await db.commit()
