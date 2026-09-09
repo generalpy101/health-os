@@ -114,6 +114,23 @@ async def test_goal_and_plan_updates_versioned_and_revertible(client):
 
 
 @pytest.mark.asyncio
+async def test_ai_target_change_records_ai_actor(client):
+    await signup(client, "c-ai-actor@example.com")
+    r = await client.post(f"{API}/targets", json={"key": "protein", "value": 140, "unit": "g"})
+    t1 = r.json()["id"]
+
+    # mock provider parses this into a create_target tool call (source="ai")
+    r = await client.post(f"{API}/ai/chat", json={"message": "set protein target to 160"})
+    assert r.status_code == 200, r.text
+    assert any(a["tool"] == "create_target" and a["status"] == "executed" for a in r.json()["actions"])
+
+    versions = (await client.get(f"{API}/versions/target/{t1}")).json()
+    assert len(versions) == 1
+    assert versions[0]["actor"] == "ai"
+    assert versions[0]["snapshot"]["value"] == 140
+
+
+@pytest.mark.asyncio
 async def test_ingest_token_flow_and_idempotency(client):
     await signup(client, "c-ingest@example.com")
 
@@ -145,11 +162,11 @@ async def test_ingest_token_flow_and_idempotency(client):
     auth = {"Authorization": f"Bearer {token2}"}
     r = await client.post(f"{API}/integrations/ingest", json=payload, headers=auth)
     assert r.status_code == 200, r.text
-    assert r.json() == {"accepted": 4, "duplicates": 0}
+    assert r.json() == {"accepted": 4, "duplicates": 0, "rejected": 1}
 
     # re-ingest: external_id makes it idempotent
     r = await client.post(f"{API}/integrations/ingest", json=payload, headers=auth)
-    assert r.json() == {"accepted": 0, "duplicates": 4}
+    assert r.json() == {"accepted": 0, "duplicates": 4, "rejected": 1}
 
     # mirrors landed in the domain tables
     r = await client.get(f"{API}/measurements", params={"type": "weight"})

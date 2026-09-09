@@ -79,10 +79,11 @@ def _local_date(observed_at: datetime, tz_name: str):
 
 
 async def ingest(db: AsyncSession, user: User, data: IngestIn) -> dict:
-    accepted = duplicates = 0
+    accepted = duplicates = rejected = 0
     for ev in data.events:
         if ev.metric not in KNOWN_METRICS:
-            continue  # unknown metrics are skipped entirely (not counted)
+            rejected += 1  # unknown metric — skipped, surfaced in the response
+            continue
         if ev.external_id:
             existing = await db.execute(
                 select(IntegrationEvent.id).where(
@@ -103,7 +104,7 @@ async def ingest(db: AsyncSession, user: User, data: IngestIn) -> dict:
         _mirror(db, user, ev.metric, ev.value, ev.unit, ev.observed_at)
         accepted += 1
     await db.commit()
-    return {"accepted": accepted, "duplicates": duplicates}
+    return {"accepted": accepted, "duplicates": duplicates, "rejected": rejected}
 
 
 def _mirror(db: AsyncSession, user: User, metric: str, value: float, unit: str | None,

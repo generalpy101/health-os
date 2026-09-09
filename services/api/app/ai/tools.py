@@ -62,7 +62,7 @@ async def h_create_goal(db, user, args):
 
 async def h_update_goal(db, user, args):
     from ..schemas import GoalPatch
-    g = await goals.update_goal(db, user, args.pop("goal_id"), GoalPatch(**args))
+    g = await goals.update_goal(db, user, args.pop("goal_id"), GoalPatch(**args), actor="ai")
     return {"updated": _obj(g, ["id", "title", "status", "target_value"])}
 
 
