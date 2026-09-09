@@ -224,7 +224,13 @@ export default function MealsPage() {
 function BlockDetailSheet({ block, onClose }: { block: Block | null; onClose: () => void }) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const [timeEdit, setTimeEdit] = useState("");
   const invalidate = () => { queryClient.invalidateQueries(); onClose(); };
+
+  useEffect(() => {
+    if (!block) return;
+    setTimeEdit(`${String(Math.floor(block.startMin / 60)).padStart(2, "0")}:${String(block.startMin % 60).padStart(2, "0")}`);
+  }, [block]);
 
   const delLog = useMutation({
     mutationFn: api.deleteFoodLog, onSuccess: () => { toast("Log deleted"); invalidate(); },
@@ -238,9 +244,47 @@ function BlockDetailSheet({ block, onClose }: { block: Block | null; onClose: ()
     mutationFn: api.deleteEvent, onSuccess: () => { toast("Event deleted"); invalidate(); },
     onError: (e) => toast(e.message, "err"),
   });
+  const saveLogTime = useMutation({
+    mutationFn: () => api.updateFoodLog(block!.refId, { time: timeEdit }),
+    onSuccess: () => { toast("Time updated"); invalidate(); },
+    onError: (e) => toast(e.message, "err"),
+  });
+  const savePlanTime = useMutation({
+    mutationFn: () => api.updateMealPlan(block!.refId, { time: timeEdit }),
+    onSuccess: () => { toast("Time updated"); invalidate(); },
+    onError: (e) => toast(e.message, "err"),
+  });
+  const saveEventTime = useMutation({
+    mutationFn: () => {
+      const ev = block!.payload as ScheduleEvent;
+      const start = new Date(ev.start_at);
+      const [h, m] = timeEdit.split(":").map(Number);
+      const next = new Date(start);
+      next.setHours(h, m, 0, 0);
+      return api.updateEvent(block!.refId, { start_at: next.toISOString() });
+    },
+    onSuccess: () => { toast("Time updated"); invalidate(); },
+    onError: (e) => toast(e.message, "err"),
+  });
 
   if (!block) return null;
   const hhmm = `${String(Math.floor(block.startMin / 60)).padStart(2, "0")}:${String(block.startMin % 60).padStart(2, "0")}`;
+
+  const timeEditor = (onSave: () => void, pending: boolean, clearable: boolean) => (
+    <div className="flex items-center gap-2 rounded-xl border border-line p-3">
+      <Field label="Time" >
+        <Input type="time" value={timeEdit} onChange={(e) => setTimeEdit(e.target.value)} className="h-10" />
+      </Field>
+      <div className="mt-6 flex gap-2">
+        <Button size="sm" onClick={onSave} disabled={pending || !timeEdit}>Save</Button>
+        {clearable && (
+          <Button size="sm" variant="ghost" onClick={() => { setTimeEdit(""); setTimeout(() => onSave(), 0); }}>
+            Anytime
+          </Button>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <Sheet open={!!block} onClose={onClose} title={block.title}>
@@ -261,6 +305,7 @@ function BlockDetailSheet({ block, onClose }: { block: Block | null; onClose: ()
               <span>Total</span>
               <span>{fmtNumber(log.calories)} kcal · {fmtNumber(log.protein)}g protein</span>
             </div>
+            {timeEditor(() => saveLogTime.mutate(), saveLogTime.isPending, false)}
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => { onClose(); window.location.href = "/nutrition"; }}>
                 Open in Nutrition
@@ -278,6 +323,7 @@ function BlockDetailSheet({ block, onClose }: { block: Block | null; onClose: ()
           <p className="text-sm text-muted">
             Planned · {block.sub}{block.startMin ? ` · ${hhmm}` : " · anytime"}
           </p>
+          {timeEditor(() => savePlanTime.mutate(), savePlanTime.isPending, true)}
           <Button variant="danger" className="w-full" onClick={() => delPlan.mutate(block.refId)} disabled={delPlan.isPending}>
             Remove from plan
           </Button>
@@ -291,6 +337,10 @@ function BlockDetailSheet({ block, onClose }: { block: Block | null; onClose: ()
             <p className="text-sm text-muted capitalize">
               {ev.type} · starts {hhmm}{ev.recurring ? " · repeats weekly" : ""}
             </p>
+            {timeEditor(() => saveEventTime.mutate(), saveEventTime.isPending, false)}
+            {ev.recurring && (
+              <p className="text-[11px] text-faint">Moves this recurring event's time for all future occurrences.</p>
+            )}
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => { onClose(); window.location.href = "/schedule"; }}>
                 Edit in Planner

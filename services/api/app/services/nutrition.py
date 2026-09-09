@@ -175,6 +175,9 @@ async def _resolve_item(db: AsyncSession, user: User, item: dict) -> dict:
 async def log_food(db: AsyncSession, user: User, data: FoodLogIn, source: str | None = None) -> FoodLog:
     items = [await _resolve_item(db, user, i.model_dump()) for i in data.items]
     totals = metrics.sum_items(items)
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZoneInfo
+    _now = _dt.now(_ZoneInfo(user.timezone))
     log = FoodLog(
         user_id=user.id,
         date=parse_date(data.date, user.timezone),
@@ -182,6 +185,7 @@ async def log_food(db: AsyncSession, user: User, data: FoodLogIn, source: str | 
         items=items,
         note=data.note,
         source=source or data.source,
+        eaten_at=_now,  # defaults to now; user-editable later
         **totals,
     )
     db.add(log)
@@ -212,6 +216,31 @@ async def delete_food_log(db: AsyncSession, user: User, log_id: UUID) -> None:
     await db.delete(log)
     await audit(db, user.id, "food_log_deleted", "food_log", log_id)
     await db.commit()
+
+
+async def update_food_log(db: AsyncSession, user: User, log_id: UUID, *,
+                          meal_type: str | None = None, note: str | None = None,
+                          time: str | None = None) -> FoodLog:
+    """Edit log metadata (never the nutrient math — items stay snapshotted)."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    log = await get_owned(db, FoodLog, log_id, user)
+    if meal_type:
+        log.meal_type = meal_type
+    if note is not None:
+        log.note = note
+    if time:
+        try:
+            h, m = time.split(":")
+            tz = ZoneInfo(user.timezone)
+            log.eaten_at = _dt(log.date.year, log.date.month, log.date.day, int(h), int(m), tzinfo=tz)
+        except (ValueError, AttributeError):
+            from fastapi import HTTPException
+            raise HTTPException(422, "time must be HH:MM")
+    await db.commit()
+    await db.refresh(log)
+    return log
 
 
 async def daily_totals(db: AsyncSession, user: User, day: date) -> dict:

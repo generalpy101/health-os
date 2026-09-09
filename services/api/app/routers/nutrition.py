@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..deps import current_user
 from ..models import User
-from ..schemas import FoodIn, FoodLogIn, FoodLogOut, FoodOut, NutritionDayOut
+from ..schemas import FoodIn, FoodLogIn, FoodLogOut, FoodLogPatch, FoodOut, NutritionDayOut
 from ..services import goals as goals_service
 from ..services import nutrition as nutrition_service
 from ..utils.time import parse_date
@@ -48,6 +48,13 @@ async def list_food_logs(day: date | None = None, start: date | None = None, end
                          limit: int = 50, offset: int = 0,
                          user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     return await nutrition_service.list_food_logs(db, user, day, start, end, limit, offset)
+
+
+@router.patch("/food-logs/{log_id}", response_model=FoodLogOut)
+async def patch_food_log(log_id: UUID, data: FoodLogPatch, user: User = Depends(current_user),
+                         db: AsyncSession = Depends(get_db)):
+    return await nutrition_service.update_food_log(
+        db, user, log_id, meal_type=data.meal_type, note=data.note, time=data.time)
 
 
 @router.delete("/food-logs/{log_id}", status_code=204)

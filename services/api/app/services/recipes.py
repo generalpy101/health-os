@@ -101,6 +101,34 @@ async def list_meal_plans(db: AsyncSession, user: User, start: date, end: date) 
     return list(result.scalars().all())
 
 
+async def update_meal_plan(db: AsyncSession, user: User, plan_id: UUID, *,
+                           time: str | None | object = ..., meal_type: str | None = None,
+                           name: str | None = None, servings: float | None = None,
+                           notes: str | None = None) -> MealPlan:
+    plan = await get_owned(db, MealPlan, plan_id, user)
+    if time is not ...:
+        if time is None or time == "":
+            plan.time_minutes = None
+        else:
+            try:
+                h, m = str(time).split(":")
+                plan.time_minutes = int(h) * 60 + int(m)
+            except (ValueError, AttributeError):
+                from fastapi import HTTPException
+                raise HTTPException(422, "time must be HH:MM")
+    if meal_type is not None:
+        plan.meal_type = meal_type
+    if name is not None:
+        plan.name = name
+    if servings is not None and servings > 0:
+        plan.servings = servings
+    if notes is not None:
+        plan.notes = notes
+    await db.commit()
+    await db.refresh(plan)
+    return plan
+
+
 async def delete_meal_plan(db: AsyncSession, user: User, plan_id: UUID) -> None:
     plan = await get_owned(db, MealPlan, plan_id, user)
     await db.delete(plan)

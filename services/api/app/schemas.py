@@ -216,6 +216,12 @@ class FoodLogIn(BaseModel):
     source: str = "manual"
 
 
+class FoodLogPatch(BaseModel):
+    meal_type: str | None = None
+    note: str | None = None
+    time: str | None = None  # "HH:MM" local — when it was eaten
+
+
 class FoodLogOut(ORMModel):
     id: UUID
     date: date
@@ -228,6 +234,7 @@ class FoodLogOut(ORMModel):
     fiber: float
     note: str | None
     source: str
+    eaten_at: datetime | None
     created_at: datetime
 
 

@@ -79,6 +79,7 @@ export interface FoodLog {
   fat: number;
   fiber: number;
   note: string | null;
+  eaten_at?: string | null;
   created_at: string;
 }
 

@@ -2,6 +2,7 @@ from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -54,6 +55,22 @@ async def list_meal_plans(start: date, end: date, user: User = Depends(current_u
 @router.post("/meal-plans", response_model=MealPlanOut, status_code=201)
 async def create_meal_plan(data: MealPlanIn, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     return await recipes_service.create_meal_plan(db, user, data)
+
+
+class MealPlanPatch(BaseModel):
+    time: str | None = None  # "HH:MM"; empty string clears to unscheduled
+    meal_type: str | None = None
+    name: str | None = None
+    servings: float | None = None
+    notes: str | None = None
+
+
+@router.patch("/meal-plans/{plan_id}", response_model=MealPlanOut)
+async def update_meal_plan(plan_id: UUID, data: MealPlanPatch, user: User = Depends(current_user),
+                           db: AsyncSession = Depends(get_db)):
+    return await recipes_service.update_meal_plan(
+        db, user, plan_id, time=data.time, meal_type=data.meal_type, name=data.name,
+        servings=data.servings, notes=data.notes)
 
 
 @router.delete("/meal-plans/{plan_id}", status_code=204)

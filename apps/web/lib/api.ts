@@ -182,6 +182,8 @@ const apiBase = {
   }) => post<FoodLog>("/food-logs", b),
   foodLogs: (day?: string) => request<FoodLog[]>(`/food-logs${qs({ day })}`),
   foodLogsRange: (start: string, end: string) => request<FoodLog[]>(`/food-logs${qs({ start, end, limit: 200 })}`),
+  updateFoodLog: (id: string, b: { time?: string; meal_type?: string; note?: string }) =>
+    patch<FoodLog>(`/food-logs/${id}`, b),
   deleteFoodLog: (id: string) => del(`/food-logs/${id}`),
   dailyNutrition: (day?: string) => request<NutritionDay>(`/nutrition/daily${qs({ day })}`),
 
@@ -195,6 +197,8 @@ const apiBase = {
       `/meal-plans${qs({ start, end })}`),
   createMealPlan: (b: { date: string; meal_type: string; time?: string; recipe_id?: string; name: string; servings?: number }) =>
     post("/meal-plans", b),
+  updateMealPlan: (id: string, b: { time?: string; meal_type?: string; name?: string; servings?: number; notes?: string }) =>
+    patch(`/meal-plans/${id}`, b),
   deleteMealPlan: (id: string) => del(`/meal-plans/${id}`),
   groceryList: (start: string, end: string) =>
     request<{ items: { name: string; quantity: number; unit: string }[] }>(`/grocery-list${qs({ start, end })}`),

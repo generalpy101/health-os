@@ -143,6 +143,8 @@ class FoodLog(Base):
     fiber: Mapped[float] = mapped_column(sa.Float, default=0)
     note: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     source: Mapped[str] = mapped_column(sa.String(32), default="manual")  # manual|ai|photo|import
+    # when the meal was actually eaten (defaults to created_at at insert); user-editable
+    eaten_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
 
 

@@ -64,7 +64,7 @@ export function DayTimeline({ day, onPickSlot, onPickBlock }: {
       }
     }
     for (const l of logs || []) {
-      const at = new Date(l.created_at);
+      const at = new Date(l.eaten_at || l.created_at);
       const startMin = at.getHours() * 60 + at.getMinutes();
       blocks.push({
         id: `log-${l.id}`, title: l.items.map((i) => i.name).slice(0, 3).join(", ") || l.meal_type,
