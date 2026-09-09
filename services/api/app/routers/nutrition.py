@@ -38,6 +38,12 @@ async def create_food(data: FoodIn, user: User = Depends(current_user), db: Asyn
     return await nutrition_service.create_food(db, user, data)
 
 
+@router.put("/foods/{food_id}", response_model=FoodOut)
+async def update_food(food_id: UUID, data: FoodIn, user: User = Depends(current_user),
+                      db: AsyncSession = Depends(get_db)):
+    return await nutrition_service.update_food(db, user, food_id, data)
+
+
 @router.post("/food-logs", response_model=FoodLogOut, status_code=201)
 async def log_food(data: FoodLogIn, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     return await nutrition_service.log_food(db, user, data)

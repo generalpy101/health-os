@@ -2,6 +2,8 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
+from fastapi import HTTPException
+
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -91,6 +93,18 @@ async def create_food(db: AsyncSession, user: User, data: FoodIn) -> Food:
     food = Food(user_id=user.id, **data.model_dump())
     db.add(food)
     await audit(db, user.id, "food_created", "food", food.id, {"name": food.name})
+    await db.commit()
+    await db.refresh(food)
+    return food
+
+
+async def update_food(db: AsyncSession, user: User, food_id: UUID, data: FoodIn) -> Food:
+    """Only user-owned foods are editable — global reference rows are never mutated."""
+    food = await db.get(Food, food_id)
+    if food is None or food.user_id != user.id:
+        raise HTTPException(404, "Food not found")
+    for key, value in data.model_dump().items():
+        setattr(food, key, value)
     await db.commit()
     await db.refresh(food)
     return food
