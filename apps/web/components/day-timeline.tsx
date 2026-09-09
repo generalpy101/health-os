@@ -56,10 +56,11 @@ export function DayTimeline({ day, onPickSlot, onPickBlock }: {
     queryKey: ["meal-plans", useBoundary ? `${day}_${nextDay}` : day],
     queryFn: () => useBoundary ? api.mealPlans(day, nextDay) : api.mealPlans(day, day),
   });
-  const { data: logsA } = useQuery({ queryKey: ["food-logs", day], queryFn: () => api.foodLogs(day) });
+  // calendar=1: raw date listing — the boundary window is applied client-side below
+  const { data: logsA } = useQuery({ queryKey: ["food-logs-raw", day], queryFn: () => api.foodLogs(day, true) });
   const { data: logsB } = useQuery({
-    queryKey: ["food-logs", nextDay],
-    queryFn: () => api.foodLogs(nextDay),
+    queryKey: ["food-logs-raw", nextDay],
+    queryFn: () => api.foodLogs(nextDay, true),
     enabled: useBoundary,
   });
   const { data: events } = useQuery({

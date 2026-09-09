@@ -45,9 +45,9 @@ async def log_food(data: FoodLogIn, user: User = Depends(current_user), db: Asyn
 
 @router.get("/food-logs", response_model=list[FoodLogOut])
 async def list_food_logs(day: date | None = None, start: date | None = None, end: date | None = None,
-                         limit: int = 50, offset: int = 0,
+                         limit: int = 50, offset: int = 0, calendar: bool = False,
                          user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
-    return await nutrition_service.list_food_logs(db, user, day, start, end, limit, offset)
+    return await nutrition_service.list_food_logs(db, user, day, start, end, limit, offset, calendar)
 
 
 @router.patch("/food-logs/{log_id}", response_model=FoodLogOut)

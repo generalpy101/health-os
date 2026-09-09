@@ -207,8 +207,9 @@ async def log_food(db: AsyncSession, user: User, data: FoodLogIn, source: str | 
 
 async def list_food_logs(db: AsyncSession, user: User, day: date | None = None,
                          start: date | None = None, end: date | None = None,
-                         limit: int = 50, offset: int = 0) -> list[FoodLog]:
-    if day is not None and start is None and end is None:
+                         limit: int = 50, offset: int = 0, calendar: bool = False) -> list[FoodLog]:
+    # calendar=True: raw date-column listing (timeline does its own window math)
+    if day is not None and start is None and end is None and not calendar:
         return (await _logs_for_day(db, user, day, limit))[offset:]
     stmt = select(FoodLog).where(FoodLog.user_id == user.id)
     if start:

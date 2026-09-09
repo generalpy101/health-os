@@ -180,7 +180,7 @@ const apiBase = {
       estimated?: boolean; confidence?: number; lower_kcal?: number; upper_kcal?: number;
     }[];
   }) => post<FoodLog>("/food-logs", b),
-  foodLogs: (day?: string) => request<FoodLog[]>(`/food-logs${qs({ day })}`),
+  foodLogs: (day?: string, calendar?: boolean) => request<FoodLog[]>(`/food-logs${qs({ day, calendar: calendar ? 1 : undefined })}`),
   foodLogsRange: (start: string, end: string) => request<FoodLog[]>(`/food-logs${qs({ start, end, limit: 200 })}`),
   updateFoodLog: (id: string, b: {
     time?: string; meal_type?: string; note?: string;
