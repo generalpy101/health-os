@@ -268,13 +268,15 @@ async def update_food_log(db: AsyncSession, user: User, log_id: UUID, *,
 
 
 async def _effective_dt(log: FoodLog, tz_name: str) -> datetime:
-    """When the meal happened: eaten_at when set, else noon of its calendar date
-    (legacy rows — noon sits inside any sane day boundary)."""
+    """When the meal happened: eaten_at when set; legacy rows use created_at (the
+    real time of entry — far closer than a noon guess, and lands inside day
+    boundaries set in the afternoon)."""
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo
 
-    if log.eaten_at is not None:
-        return log.eaten_at if log.eaten_at.tzinfo else log.eaten_at.replace(tzinfo=timezone.utc)
+    ts = log.eaten_at or log.created_at
+    if ts is not None:
+        return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
     return _dt(log.date.year, log.date.month, log.date.day, 12, 0, tzinfo=ZoneInfo(tz_name))
 
 
