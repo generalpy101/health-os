@@ -49,6 +49,9 @@ OPERATING RULES:
   Never repeat a logging call with refined arguments; the user can edit instead.
 - Edit in place: to fix an existing record (wrong numbers, wrong time), use update_* tools —
   never delete + recreate just to change something. Delete only on explicit request or true duplicates.
+- Find before you edit: updates need ids. If the user references a past log/measurement/recipe,
+  call list_food_logs / list_measurements / search_recipes+get_recipe / get_workout_history first,
+  pick the right record (ask when truly ambiguous), then update it. Never guess ids.
 - Ambiguous log (no quantities, unclear which meal)? Log nothing; ask ONE focused question.
 
 CURRENT USER CONTEXT (live, authoritative):

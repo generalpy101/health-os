@@ -12,7 +12,7 @@ from typing import Any, Awaitable, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Habit, User, UserMemory, UserProfile
+from ..models import Food, Habit, User, UserMemory, UserProfile
 from ..schemas import (ActivityIn, EventIn, FoodLogIn, FoodLogItemIn, GoalIn, HabitIn, HabitLogIn,
                        MeasurementIn, SleepIn, TargetIn, WaterIn, WorkoutIn)
 from ..services import fitness, goals, habits, health, nutrition, schedule
@@ -344,6 +344,63 @@ async def h_delete_habit(db, user, args):
     return {"archived": True}
 
 
+async def h_list_food_logs(db, user, args):
+    """The agent's way to find a log before editing it."""
+    from datetime import timedelta
+    from ..utils.time import user_today
+    if args.get("date"):
+        logs = await nutrition.list_food_logs(db, user, day=parse_date(args["date"], user.timezone))
+    else:
+        end = user_today(user.timezone)
+        logs = await nutrition.list_food_logs(db, user, start=end - timedelta(days=int(args.get("days", 2)) - 1),
+                                              end=end, limit=20)
+    return {"logs": [{"id": str(l.id), "date": str(l.date), "meal_type": l.meal_type,
+                      "calories": l.calories, "protein": l.protein,
+                      "items": [{"name": i["name"], "quantity": i["quantity"], "unit": i["unit"],
+                                 "calories": i.get("calories"), "protein": i.get("protein"),
+                                 "food_id": i.get("food_id")} for i in (l.items or [])]}
+                     for l in logs]}
+
+
+async def h_list_measurements(db, user, args):
+    from datetime import timedelta
+    from ..utils.time import user_today
+    end = user_today(user.timezone)
+    rows = await health.list_measurements(db, user, type_=args.get("type"),
+                                          start=end - timedelta(days=int(args.get("days", 14)) - 1), end=end, limit=30)
+    return {"measurements": [_obj(m, ["id", "type", "value", "unit", "date"]) for m in rows]}
+
+
+async def h_get_recipe(db, user, args):
+    from ..services import recipes as recipes_service
+    r = await recipes_service.get_recipe(db, user, args["recipe_id"])
+    return {"recipe": {"id": str(r.id), "name": r.name, "description": r.description, "servings": r.servings,
+                       "prep_minutes": r.prep_minutes, "cook_minutes": r.cook_minutes,
+                       "ingredients": r.ingredients, "steps": r.steps, "tags": r.tags, "cuisine": r.cuisine,
+                       "nutrition": r.nutrition}}
+
+
+async def h_update_food(db, user, args):
+    """Register/correct a food's label values (user-owned foods only)."""
+    from ..schemas import FoodIn
+    current = await db.get(Food, args["food_id"])
+    if current is None or current.user_id != user.id:
+        return {"error": "food not found or not yours"}
+    f = await nutrition.update_food(db, user, args["food_id"], FoodIn(
+        name=args.get("name", current.name),
+        brand=args.get("brand", current.brand),
+        serving_size=float(args.get("serving_size", current.serving_size)),
+        serving_unit=args.get("serving_unit", current.serving_unit),
+        calories=float(args.get("calories", current.calories)),
+        protein=float(args.get("protein", current.protein)),
+        carbs=float(args.get("carbs", current.carbs)),
+        fat=float(args.get("fat", current.fat)),
+        fiber=float(args.get("fiber", current.fiber)),
+        barcode=args.get("barcode", current.barcode),
+    ))
+    return {"updated": _obj(f, ["id", "name", "calories", "protein", "serving_size", "serving_unit"])}
+
+
 async def h_suggest_meal(db, user, args):
     from ..services import suggest as suggest_service
     return await suggest_service.meal_suggestions(db, user)
@@ -465,6 +522,15 @@ REGISTRY: dict[str, tuple[dict, Handler, str]] = {
         ["measurement_id", "type", "value"]), h_update_measurement, MEDIUM),
     "delete_measurement": (_schema("delete_measurement", "Delete a measurement", {"measurement_id": S}, ["measurement_id"]), h_delete_measurement, MEDIUM),
     "delete_habit": (_schema("delete_habit", "Archive a habit (keeps its history)", {"habit_id": S}, ["habit_id"]), h_delete_habit, MEDIUM),
+    "list_food_logs": (_schema("list_food_logs", "List food logs WITH ids and items — call this before updating/deleting a log", {
+        "date": S, "days": N}), h_list_food_logs, LOW),
+    "list_measurements": (_schema("list_measurements", "List measurements WITH ids — call before updating/deleting one", {
+        "type": S, "days": N}), h_list_measurements, LOW),
+    "get_recipe": (_schema("get_recipe", "Get a full recipe (ingredients, steps) — call before updating it", {
+        "recipe_id": S}, ["recipe_id"]), h_get_recipe, LOW),
+    "update_food": (_schema("update_food", "Update one of the user's OWN foods (e.g. register label nutrition). Global foods can't be edited — create a custom food instead", {
+        "food_id": S, "name": S, "brand": S, "serving_size": N, "serving_unit": S,
+        "calories": N, "protein": N, "carbs": N, "fat": N, "fiber": N, "barcode": S}, ["food_id"]), h_update_food, MEDIUM),
 }
 
 
